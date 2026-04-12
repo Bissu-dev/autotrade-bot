@@ -25,22 +25,23 @@ CRYPTO_IDS = {
 }
 
 FOREX_SYMBOLS = {
-    "eurusd": ("EUR", "USD"), "eur/usd": ("EUR", "USD"), "euro": ("EUR", "USD"),
+    "eurusd": ("EUR", "USD"), "eur/usd": ("EUR", "USD"),
     "gbpusd": ("GBP", "USD"), "gbp/usd": ("GBP", "USD"),
     "usdjpy": ("USD", "JPY"), "usd/jpy": ("USD", "JPY"),
     "usdchf": ("USD", "CHF"), "usd/chf": ("USD", "CHF"),
     "audusd": ("AUD", "USD"), "aud/usd": ("AUD", "USD"),
     "usdcad": ("USD", "CAD"), "usd/cad": ("USD", "CAD"),
+    "euro dollar": ("EUR", "USD"),
 }
 
 COMMODITY_KEYWORDS = {
-    "gold": "XAU", "or": "XAU",
-    "silver": "XAG", "argent": "XAG",
+    "gold": "XAU", "or": "XAU", "xau": "XAU",
+    "silver": "XAG", "argent": "XAG", "xag": "XAG",
 }
 
 INDEX_SYMBOLS = {
     "nasdaq": "^IXIC", "nasdaq100": "^NDX",
-    "sp500": "^GSPC", "s&p500": "^GSPC",
+    "sp500": "^GSPC", "s&p500": "^GSPC", "s&p 500": "^GSPC",
     "cac40": "^FCHI", "cac 40": "^FCHI",
     "dax": "^GDAXI",
 }
@@ -71,21 +72,18 @@ def get_forex_price(from_currency, to_currency):
 
 def get_commodity_price(symbol, label):
     try:
-        url = "https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=" + symbol + "&to_currency=USD&apikey=" + ALPHA_VANTAGE_KEY
+        instrument = symbol + "/USD"
+        url = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/" + symbol + "/USD"
         r = requests.get(url, timeout=5)
         data = r.json()
-        rate = float(data["Realtime Currency Exchange Rate"]["5. Exchange Rate"])
+        ask = data[0]["spreadProfilePrices"][0]["ask"]
+        bid = data[0]["spreadProfilePrices"][0]["bid"]
+        price = (ask + bid) / 2
         emoji = "🥇" if symbol == "XAU" else "🥈"
-        return emoji + " *" + label.upper() + "*\n💵 $" + "{:,.2f}".format(rate) + " USD/oz"
+        name = "OR (XAU/USD)" if symbol == "XAU" else "ARGENT (XAG/USD)"
+        return emoji + " *" + name + "*\n💵 $" + "{:,.2f}".format(price) + " USD/oz"
     except:
-        try:
-            url = "https://api.coingecko.com/api/v3/simple/price?ids=tether-gold&vs_currencies=usd"
-            r = requests.get(url, timeout=5)
-            data = r.json()
-            rate = data["tether-gold"]["usd"]
-            return "🥇 *" + label.upper() + "*\n💵 $" + "{:,.2f}".format(rate) + " USD/oz"
-        except:
-            return None
+        return None
 
 def get_index_price(yahoo_symbol, label):
     try:
@@ -104,22 +102,22 @@ def get_index_price(yahoo_symbol, label):
 
 def detect_asset(text):
     text_lower = text.lower()
+    for keyword, sym in COMMODITY_KEYWORDS.items():
+        if keyword in text_lower:
+            return ("commodity", sym, keyword)
     for keyword, coin_id in CRYPTO_IDS.items():
         if keyword in text_lower:
             return ("crypto", coin_id, keyword)
     for keyword, (fc, tc) in FOREX_SYMBOLS.items():
         if keyword in text_lower:
             return ("forex", (fc, tc), keyword)
-    for keyword, sym in COMMODITY_KEYWORDS.items():
-        if keyword in text_lower:
-            return ("commodity", sym, keyword)
     for keyword, sym in INDEX_SYMBOLS.items():
         if keyword in text_lower:
             return ("index", sym, keyword)
     return None
 
 def get_language(text):
-    italian_words = ["ciao", "come", "cosa", "perché", "quando", "dove", "grazie", "aiuto"]
+    italian_words = ["ciao", "come", "cosa", "perche", "quando", "dove", "grazie", "aiuto"]
     if any(w in text.lower() for w in italian_words):
         return "it"
     return "fr"
@@ -172,12 +170,12 @@ def handle_message(message):
     try:
         user_content = message.text
         if price_info:
-            user_content = message.text + "\n\n[DONNÉES EN TEMPS RÉEL: " + price_info + "]"
+            user_content = message.text + "\n\n[DONNEES EN TEMPS REEL: " + price_info + "]"
 
         response = client.messages.create(
             model="claude-opus-4-5",
             max_tokens=500,
-            system="Tu es un expert en trading (crypto, forex, indices, matières premières). Réponds en français sauf si l'utilisateur écrit en italien. Les prix en temps réel sont déjà affichés — ne dis JAMAIS que tu n'as pas accès aux données de marché. Base ton analyse uniquement sur les prix fournis en temps réel.",
+            system="Tu es un expert en trading (crypto, forex, indices, matieres premieres). Reponds en francais sauf si l utilisateur ecrit en italien. Les prix en temps reel sont deja affiches. Ne dis JAMAIS que tu n as pas acces aux donnees de marche. Base ton analyse uniquement sur les prix fournis.",
             messages=[{"role": "user", "content": user_content}]
         )
         answer = response.content[0].text
@@ -189,7 +187,7 @@ def handle_message(message):
         bot.reply_to(message, full_response, parse_mode="Markdown")
 
     except Exception as e:
-        bot.reply_to(message, "⚠️ Erreur : " + str(e))
+        bot.reply_to(message, "Erreur : " + str(e))
 
 if __name__ == "__main__":
     print("AutoTrade Bot is running...")
