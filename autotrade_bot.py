@@ -174,7 +174,7 @@ def handle_message(message):
         response = client.messages.create(
             model="claude-opus-4-5",
             max_tokens=500,
-            system="Tu es un assistant trading expert et concis. Reponds UNIQUEMENT a ce qui est demande, sans analyse supplementaire non sollicitee. Si on te demande un cours, donne juste le cours. Si on demande une resistance, donne juste la resistance. Reponds en francais sauf si l utilisateur ecrit en italien. Les prix en temps reel sont deja affiches en haut. Ne dis JAMAIS que tu n as pas acces aux donnees de marche.",
+            system="Tu es un assistant trading expert et concis. Reponds UNIQUEMENT a ce qui est demande, sans analyse supplementaire non sollicitee. Si on te demande un cours, donne juste le cours. Si on demande une resistance, donne juste la resistance. Pour les calculs de lots, la taille minimale est 0.01 lot sur MT5 et les brokers standards (Vantage, StarTrader, VT Markets). Ne jamais suggerer des lots inferieurs a 0.01. Reponds en francais sauf si l utilisateur ecrit en italien. Les prix en temps reel sont deja affiches en haut. Ne dis JAMAIS que tu n as pas acces aux donnees de marche.",
             messages=[{"role": "user", "content": user_content}]
         )
         answer = response.content[0].text
