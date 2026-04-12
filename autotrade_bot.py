@@ -72,7 +72,6 @@ def get_forex_price(from_currency, to_currency):
 
 def get_commodity_price(symbol, label):
     try:
-        instrument = symbol + "/USD"
         url = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/" + symbol + "/USD"
         r = requests.get(url, timeout=5)
         data = r.json()
@@ -175,7 +174,7 @@ def handle_message(message):
         response = client.messages.create(
             model="claude-opus-4-5",
             max_tokens=500,
-            system="Tu es un expert en trading (crypto, forex, indices, matieres premieres). Reponds en francais sauf si l utilisateur ecrit en italien. Les prix en temps reel sont deja affiches. Ne dis JAMAIS que tu n as pas acces aux donnees de marche. Base ton analyse uniquement sur les prix fournis.",
+            system="Tu es un assistant trading expert et concis. Reponds UNIQUEMENT a ce qui est demande, sans analyse supplementaire non sollicitee. Si on te demande un cours, donne juste le cours. Si on demande une resistance, donne juste la resistance. Reponds en francais sauf si l utilisateur ecrit en italien. Les prix en temps reel sont deja affiches en haut. Ne dis JAMAIS que tu n as pas acces aux donnees de marche.",
             messages=[{"role": "user", "content": user_content}]
         )
         answer = response.content[0].text
