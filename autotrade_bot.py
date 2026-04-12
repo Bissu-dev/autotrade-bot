@@ -33,7 +33,7 @@ FOREX_SYMBOLS = {
     "usdcad": ("USD", "CAD"), "usd/cad": ("USD", "CAD"),
 }
 
-COMMODITY_SYMBOLS = {
+COMMODITY_KEYWORDS = {
     "gold": "XAU", "or": "XAU",
     "silver": "XAG", "argent": "XAG",
 }
@@ -47,43 +47,49 @@ INDEX_SYMBOLS = {
 
 def get_crypto_price(coin_id, symbol):
     try:
-        url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd,eur&include_24hr_change=true"
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=" + coin_id + "&vs_currencies=usd,eur&include_24hr_change=true"
         r = requests.get(url, timeout=5)
         data = r.json()
         price_usd = data[coin_id]["usd"]
         price_eur = data[coin_id]["eur"]
         change = data[coin_id]["usd_24h_change"]
         emoji = "🟢" if change >= 0 else "🔴"
-        return f"{emoji} *{symbol.upper()}*\n💵 ${price_usd:,.2f} USD\n💶 €{price_eur:,.2f} EUR\n📊 24h: {change:+.2f}%"
+        return emoji + " *" + symbol.upper() + "*\n💵 $" + "{:,.2f}".format(price_usd) + " USD\n💶 €" + "{:,.2f}".format(price_eur) + " EUR\n📊 24h: " + "{:+.2f}".format(change) + "%"
     except:
         return None
 
 def get_forex_price(from_currency, to_currency):
     try:
-        url = f"https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency={from_currency}&to_currency={to_currency}&apikey={ALPHA_VANTAGE_KEY}"
+        url = "https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=" + from_currency + "&to_currency=" + to_currency + "&apikey=" + ALPHA_VANTAGE_KEY
         r = requests.get(url, timeout=5)
         data = r.json()
         rate = float(data["Realtime Currency Exchange Rate"]["5. Exchange Rate"])
-        pair = f"{from_currency}/{to_currency}"
-        return f"💱 *{pair}*\n💵 {rate:.4f}"
+        pair = from_currency + "/" + to_currency
+        return "💱 *" + pair + "*\n💵 " + "{:.4f}".format(rate)
     except:
         return None
 
 def get_commodity_price(symbol, label):
     try:
-        # Or et Argent via Alpha Vantage (cotés en USD)
-        url = f"https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency={symbol}&to_currency=USD&apikey={ALPHA_VANTAGE_KEY}"
+        url = "https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=" + symbol + "&to_currency=USD&apikey=" + ALPHA_VANTAGE_KEY
         r = requests.get(url, timeout=5)
         data = r.json()
         rate = float(data["Realtime Currency Exchange Rate"]["5. Exchange Rate"])
         emoji = "🥇" if symbol == "XAU" else "🥈"
-        return f"{emoji} *{label.upper()}*\n💵 ${rate:,.2f} USD/oz"
+        return emoji + " *" + label.upper() + "*\n💵 $" + "{:,.2f}".format(rate) + " USD/oz"
     except:
-        return None
+        try:
+            url = "https://api.coingecko.com/api/v3/simple/price?ids=tether-gold&vs_currencies=usd"
+            r = requests.get(url, timeout=5)
+            data = r.json()
+            rate = data["tether-gold"]["usd"]
+            return "🥇 *" + label.upper() + "*\n💵 $" + "{:,.2f}".format(rate) + " USD/oz"
+        except:
+            return None
 
 def get_index_price(yahoo_symbol, label):
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_symbol}?interval=1d&range=2d"
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/" + yahoo_symbol + "?interval=1d&range=2d"
         headers = {"User-Agent": "Mozilla/5.0"}
         r = requests.get(url, headers=headers, timeout=5)
         data = r.json()
@@ -92,7 +98,7 @@ def get_index_price(yahoo_symbol, label):
         prev = meta["previousClose"]
         change = ((price - prev) / prev) * 100
         emoji = "🟢" if change >= 0 else "🔴"
-        return f"{emoji} *{label.upper()}*\n💵 {price:,.2f}\n📊 24h: {change:+.2f}%"
+        return emoji + " *" + label.upper() + "*\n💵 " + "{:,.2f}".format(price) + "\n📊 24h: " + "{:+.2f}".format(change) + "%"
     except:
         return None
 
@@ -104,7 +110,7 @@ def detect_asset(text):
     for keyword, (fc, tc) in FOREX_SYMBOLS.items():
         if keyword in text_lower:
             return ("forex", (fc, tc), keyword)
-    for keyword, sym in COMMODITY_SYMBOLS.items():
+    for keyword, sym in COMMODITY_KEYWORDS.items():
         if keyword in text_lower:
             return ("commodity", sym, keyword)
     for keyword, sym in INDEX_SYMBOLS.items():
@@ -158,13 +164,15 @@ def handle_message(message):
             price_data = get_commodity_price(symbol, keyword)
         elif asset_type == "index":
             price_data = get_index_price(symbol, keyword)
+        else:
+            price_data = None
         if price_data:
-            price_info = f"📡 *Prix en temps réel :*\n{price_data}\n\n"
+            price_info = "📡 *Prix en temps réel :*\n" + price_data + "\n\n"
 
     try:
         user_content = message.text
         if price_info:
-            user_content = f"{message.text}\n\n[DONNÉES EN TEMPS RÉEL: {price_info}]"
+            user_content = message.text + "\n\n[DONNÉES EN TEMPS RÉEL: " + price_info + "]"
 
         response = client.messages.create(
             model="claude-opus-4-5",
@@ -174,14 +182,14 @@ def handle_message(message):
         )
         answer = response.content[0].text
         footer = {
-            "fr": f"\n\n_{remaining} question(s) gratuite(s) restante(s)_",
-            "it": f"\n\n_{remaining} domanda/e gratuita/e rimanente/i_",
+            "fr": "\n\n_" + str(remaining) + " question(s) gratuite(s) restante(s)_",
+            "it": "\n\n_" + str(remaining) + " domanda/e gratuita/e rimanente/i_",
         }
         full_response = price_info + answer + footer.get(lang, footer["fr"])
         bot.reply_to(message, full_response, parse_mode="Markdown")
 
     except Exception as e:
-        bot.reply_to(message, f"⚠️ Erreur : {str(e)}")
+        bot.reply_to(message, "⚠️ Erreur : " + str(e))
 
 if __name__ == "__main__":
     print("AutoTrade Bot is running...")
