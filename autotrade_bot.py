@@ -3,6 +3,7 @@ import telebot
 import anthropic
 import requests
 import base64
+import time
 from collections import defaultdict
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -165,15 +166,15 @@ def handle_photo(message):
         image_base64 = download_image_as_base64(file_id)
 
         if not image_base64:
-            bot.reply_to(message, "⚠️ Impossible de lire l'image.")
+            bot.reply_to(message, "Impossible de lire l'image.")
             return
 
-        caption = message.caption or "Analyse ce screenshot de trading et donne moi les informations clés : actif, direction, niveaux importants, et calcul de lot si capital mentionné."
+        caption = message.caption or "Analyse ce screenshot de trading. Sois concis et direct. Donne les infos cles : actif, direction, niveaux importants. Si capital mentionne, calcule le lot (min 0.01)."
 
         response = client.messages.create(
             model="claude-opus-4-5",
             max_tokens=600,
-            system="Tu es un expert en trading (crypto, forex, indices, matieres premieres). Reponds UNIQUEMENT a ce qui est demande. Sois concis et direct. Pour les calculs de lots, la taille minimale est 0.01 lot sur MT5 et brokers standards (Vantage, StarTrader, VT Markets). Ne jamais suggerer des lots inferieurs a 0.01. Reponds en francais.",
+            system="Tu es un expert en trading concis. Reponds UNIQUEMENT a ce qui est demande. Pour les calculs de lots, minimum 0.01 lot (MT5, Vantage, StarTrader, VT Markets). Ne jamais suggerer moins de 0.01. Reponds en francais.",
             messages=[
                 {
                     "role": "user",
@@ -201,3 +202,63 @@ def handle_photo(message):
 
     except Exception as e:
         bot.reply_to(message, "Erreur : " + str(e))
+
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    user_id = message.from_user.id
+    lang = get_language(message.text)
+
+    if user_question_count[user_id] >= MAX_FREE_QUESTIONS:
+        bot.reply_to(message, get_blocked_message(lang))
+        return
+
+    user_question_count[user_id] += 1
+    remaining = MAX_FREE_QUESTIONS - user_question_count[user_id]
+
+    price_info = ""
+    asset = detect_asset(message.text)
+    if asset:
+        asset_type, symbol, keyword = asset
+        if asset_type == "crypto":
+            price_data = get_crypto_price(symbol, keyword)
+        elif asset_type == "forex":
+            price_data = get_forex_price(symbol[0], symbol[1])
+        elif asset_type == "commodity":
+            price_data = get_commodity_price(symbol, keyword)
+        elif asset_type == "index":
+            price_data = get_index_price(symbol, keyword)
+        else:
+            price_data = None
+        if price_data:
+            price_info = "📡 *Prix en temps réel :*\n" + price_data + "\n\n"
+
+    try:
+        user_content = message.text
+        if price_info:
+            user_content = message.text + "\n\n[DONNEES EN TEMPS REEL: " + price_info + "]"
+
+        response = client.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=500,
+            system="Tu es un assistant trading expert et concis. Reponds UNIQUEMENT a ce qui est demande, sans analyse supplementaire non sollicitee. Si on te demande un cours, donne juste le cours. Si on demande une resistance, donne juste la resistance. Pour les calculs de lots, la taille minimale est 0.01 lot sur MT5 et les brokers standards (Vantage, StarTrader, VT Markets). Ne jamais suggerer des lots inferieurs a 0.01. Reponds en francais sauf si l utilisateur ecrit en italien. Les prix en temps reel sont deja affiches en haut. Ne dis JAMAIS que tu n as pas acces aux donnees de marche.",
+            messages=[{"role": "user", "content": user_content}]
+        )
+        answer = response.content[0].text
+        footer = {
+            "fr": "\n\n_" + str(remaining) + " question(s) gratuite(s) restante(s)_",
+            "it": "\n\n_" + str(remaining) + " domanda/e gratuita/e rimanente/i_",
+        }
+        full_response = price_info + answer + footer.get(lang, footer["fr"])
+        bot.reply_to(message, full_response, parse_mode="Markdown")
+
+    except Exception as e:
+        bot.reply_to(message, "Erreur : " + str(e))
+
+if __name__ == "__main__":
+    while True:
+        try:
+            print("AutoTrade Bot is running...")
+            bot.infinity_polling(timeout=60, long_polling_timeout=60)
+        except Exception as e:
+            print("Erreur, redemarrage dans 5s: " + str(e))
+            time.sleep(5)
