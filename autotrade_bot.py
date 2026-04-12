@@ -101,7 +101,7 @@ def handle_message(message):
             model="claude-opus-4-5",
             max_tokens=500,
             system="Tu es un expert en trading crypto et finance. Réponds de manière concise et professionnelle. Réponds toujours en français sauf si l'utilisateur écrit en italien. IMPORTANT : Tu as accès aux prix en temps réel via CoinGecko. Ne dis JAMAIS que tu n'as pas accès aux données de marché. Le prix est déjà affiché au-dessus de ta réponse, donc ne le répète pas et concentre-toi sur l'analyse.",
-            messages=[{"role": "user", "content": message.text}]
+            messages=[{"role": "user", "content": f"{message.text}\n\n[PRIX ACTUEL EN TEMPS RÉEL: {price_info}]" if price_info else message.text}]
         )
         answer = response.content[0].text
         footer = {
