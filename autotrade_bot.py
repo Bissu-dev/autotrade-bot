@@ -156,9 +156,11 @@ FOREX_SYMBOLS = {
 }
 
 COMMODITY_KEYWORDS = {
-    "gold": "XAU", "or": "XAU", "xau": "XAU",
+    "gold": "XAU", "xau": "XAU",
     "silver": "XAG", "argent": "XAG", "xag": "XAG",
 }
+
+OR_WORDS = ["or", "l'or", "du or", "l or", "xauusd", "xau/usd"]
 
 INDEX_SYMBOLS = {
     "nasdaq": "^IXIC", "nasdaq100": "^NDX",
@@ -229,18 +231,36 @@ def get_index_price(yahoo_symbol, label):
 
 def detect_asset(text):
     text_lower = text.lower()
+    words = text_lower.split()
+
+    # Détection or uniquement sur mots exacts
+    for or_word in OR_WORDS:
+        if or_word in text_lower.split() or or_word in text_lower:
+            if or_word in ["xauusd", "xau/usd", "xau"]:
+                return ("commodity", "XAU", "or")
+            if or_word in words or ("l'or" in text_lower) or ("du or" in text_lower):
+                return ("commodity", "XAU", "or")
+
+    # Autres matières premières
     for keyword, sym in COMMODITY_KEYWORDS.items():
         if keyword in text_lower:
             return ("commodity", sym, keyword)
+
+    # Crypto
     for keyword, coin_id in CRYPTO_IDS.items():
         if keyword in text_lower:
             return ("crypto", coin_id, keyword)
+
+    # Forex
     for keyword, (fc, tc) in FOREX_SYMBOLS.items():
         if keyword in text_lower:
             return ("forex", (fc, tc), keyword)
+
+    # Indices
     for keyword, sym in INDEX_SYMBOLS.items():
         if keyword in text_lower:
             return ("index", sym, keyword)
+
     return None
 
 def create_checkout_session(user_id, price_id, plan_name):
@@ -471,7 +491,7 @@ def handle_message(message):
         if price_data:
             price_info = "📡 *Prix en temps réel :*\n" + price_data + "\n\n"
 
-    # Si c'est juste une demande de prix, on retourne uniquement le prix sans Claude
+    # Si c'est juste une demande de prix, retourner uniquement le prix sans Claude
     if price_info and is_price_only_request(message.text):
         if is_premium(user_id):
             footer = "\n\n_✨ Membre Premium_"
