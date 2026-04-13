@@ -3,3 +3,4 @@ anthropic>=0.40.0
 requests
 stripe
 flask
+psycopg2-binary
