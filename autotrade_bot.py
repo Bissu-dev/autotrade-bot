@@ -27,8 +27,22 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN)
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 app = Flask(__name__)
 
-user_question_count = defaultdict(int)
 MAX_FREE_QUESTIONS = 5
+
+PRICE_ONLY_KEYWORDS = [
+    "cours", "prix", "price", "combien", "coute", "vaut", "valeur",
+    "cote", "coté", "tarif", "quote", "rate"
+]
+
+def is_price_only_request(text):
+    text_lower = text.lower()
+    has_price_keyword = any(w in text_lower for w in PRICE_ONLY_KEYWORDS)
+    has_analysis_keyword = any(w in text_lower for w in [
+        "analyse", "analysis", "resistance", "support", "tendance",
+        "signal", "lot", "strategie", "avis", "opinion", "bullish",
+        "bearish", "haussier", "baissier", "pourquoi", "comment"
+    ])
+    return has_price_keyword and not has_analysis_keyword
 
 def get_db():
     return psycopg2.connect(DATABASE_URL)
@@ -169,7 +183,6 @@ def get_crypto_price(coin_id, symbol):
 def get_forex_price(from_currency, to_currency):
     try:
         pair = from_currency + "/" + to_currency
-        instrument = from_currency + "/" + to_currency
         url = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/" + from_currency + "/" + to_currency
         r = requests.get(url, timeout=5)
         data = r.json()
@@ -458,15 +471,24 @@ def handle_message(message):
         if price_data:
             price_info = "📡 *Prix en temps réel :*\n" + price_data + "\n\n"
 
+    # Si c'est juste une demande de prix, on retourne uniquement le prix sans Claude
+    if price_info and is_price_only_request(message.text):
+        if is_premium(user_id):
+            footer = "\n\n_✨ Membre Premium_"
+        else:
+            footer = "\n\n_" + str(remaining) + " question(s) gratuite(s) restante(s)_"
+        bot.reply_to(message, price_info + footer, parse_mode="Markdown")
+        return
+
     try:
         user_content = message.text
         if price_info:
-            user_content = message.text + "\n\n[DONNEES EN TEMPS REEL: " + price_info + ". IMPORTANT: Utilise UNIQUEMENT ce prix en temps reel, ignore toute autre valeur que tu connais.]"
+            user_content = message.text + "\n\n[DONNEES EN TEMPS REEL: " + price_info + "]"
 
         response = client.messages.create(
             model="claude-opus-4-5",
             max_tokens=500,
-            system="Tu es un assistant trading expert et concis. Reponds UNIQUEMENT a ce qui est demande. Si on te demande un cours, reponds avec le prix fourni dans les donnees en temps reel UNIQUEMENT — ne donne jamais un autre prix. Si on demande une resistance, donne juste la resistance. Pour les calculs de lots, minimum 0.01 lot sur MT5 et brokers standards. Ne jamais suggerer moins de 0.01. Reponds en francais. Ne dis JAMAIS que tu n as pas acces aux donnees de marche.",
+            system="Tu es un assistant trading expert et concis. Reponds UNIQUEMENT a ce qui est demande. Si on te demande un cours, utilise UNIQUEMENT le prix fourni dans les donnees en temps reel. Pour les calculs de lots, minimum 0.01 lot sur MT5 et brokers standards. Ne jamais suggerer moins de 0.01. Reponds en francais. Ne dis JAMAIS que tu n as pas acces aux donnees de marche.",
             messages=[{"role": "user", "content": user_content}]
         )
         answer = response.content[0].text
