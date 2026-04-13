@@ -168,12 +168,15 @@ def get_crypto_price(coin_id, symbol):
 
 def get_forex_price(from_currency, to_currency):
     try:
-        url = "https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=" + from_currency + "&to_currency=" + to_currency + "&apikey=" + ALPHA_VANTAGE_KEY
+        pair = from_currency + "/" + to_currency
+        instrument = from_currency + "/" + to_currency
+        url = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/" + from_currency + "/" + to_currency
         r = requests.get(url, timeout=5)
         data = r.json()
-        rate = float(data["Realtime Currency Exchange Rate"]["5. Exchange Rate"])
-        pair = from_currency + "/" + to_currency
-        return "💱 *" + pair + "*\n💵 " + "{:.4f}".format(rate)
+        ask = data[0]["spreadProfilePrices"][0]["ask"]
+        bid = data[0]["spreadProfilePrices"][0]["bid"]
+        price = (ask + bid) / 2
+        return "💱 *" + pair + "*\n💵 " + "{:.4f}".format(price)
     except:
         return None
 
@@ -458,12 +461,12 @@ def handle_message(message):
     try:
         user_content = message.text
         if price_info:
-            user_content = message.text + "\n\n[DONNEES EN TEMPS REEL: " + price_info + "]"
+            user_content = message.text + "\n\n[DONNEES EN TEMPS REEL: " + price_info + ". IMPORTANT: Utilise UNIQUEMENT ce prix en temps reel, ignore toute autre valeur que tu connais.]"
 
         response = client.messages.create(
             model="claude-opus-4-5",
             max_tokens=500,
-            system="Tu es un assistant trading expert et concis. Reponds UNIQUEMENT a ce qui est demande, sans analyse supplementaire non sollicitee. Si on te demande un cours, donne juste le cours. Si on demande une resistance, donne juste la resistance. Pour les calculs de lots, la taille minimale est 0.01 lot sur MT5 et les brokers standards (Vantage, StarTrader, VT Markets). Ne jamais suggerer des lots inferieurs a 0.01. Reponds en francais. Les prix en temps reel sont deja affiches en haut. Ne dis JAMAIS que tu n as pas acces aux donnees de marche.",
+            system="Tu es un assistant trading expert et concis. Reponds UNIQUEMENT a ce qui est demande. Si on te demande un cours, reponds avec le prix fourni dans les donnees en temps reel UNIQUEMENT — ne donne jamais un autre prix. Si on demande une resistance, donne juste la resistance. Pour les calculs de lots, minimum 0.01 lot sur MT5 et brokers standards. Ne jamais suggerer moins de 0.01. Reponds en francais. Ne dis JAMAIS que tu n as pas acces aux donnees de marche.",
             messages=[{"role": "user", "content": user_content}]
         )
         answer = response.content[0].text
