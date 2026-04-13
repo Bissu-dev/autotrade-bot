@@ -179,15 +179,20 @@ def get_forex_price(from_currency, to_currency):
 
 def get_commodity_price(symbol, label):
     try:
-        url = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/" + symbol + "/USD"
-        r = requests.get(url, timeout=5)
-        data = r.json()
-        ask = data[0]["spreadProfilePrices"][0]["ask"]
-        bid = data[0]["spreadProfilePrices"][0]["bid"]
-        price = (ask + bid) / 2
-        emoji = "🥇" if symbol == "XAU" else "🥈"
-        name = "OR (XAU/USD)" if symbol == "XAU" else "ARGENT (XAG/USD)"
-        return emoji + " *" + name + "*\n💵 $" + "{:,.2f}".format(price) + " USD/oz"
+        if symbol == "XAU":
+            url = "https://api.gold-api.com/price/XAU"
+            r = requests.get(url, timeout=5)
+            data = r.json()
+            price = data["price"]
+            return "🥇 *OR (XAU/USD)*\n💵 $" + "{:,.2f}".format(price) + " USD/oz"
+        elif symbol == "XAG":
+            url = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/XAG/USD"
+            r = requests.get(url, timeout=5)
+            data = r.json()
+            ask = data[0]["spreadProfilePrices"][0]["ask"]
+            bid = data[0]["spreadProfilePrices"][0]["bid"]
+            price = (ask + bid) / 2
+            return "🥈 *ARGENT (XAG/USD)*\n💵 $" + "{:,.2f}".format(price) + " USD/oz"
     except:
         return None
 
