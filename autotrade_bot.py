@@ -6,6 +6,7 @@ import base64
 import time
 import stripe
 import psycopg2
+import re
 from flask import Flask, request, jsonify
 from threading import Thread
 from collections import defaultdict
@@ -20,6 +21,7 @@ STRIPE_PRICE_ANNUEL = os.environ.get("STRIPE_PRICE_ANNUEL")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 ALPHA_VANTAGE_KEY = "2O26IQTEBFWYLALV"
 ADMIN_ID = 7244221695
+CANAL_ID = -1003587224431
 
 stripe.api_key = STRIPE_SECRET_KEY
 
@@ -28,12 +30,16 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 app = Flask(__name__)
 
 MAX_FREE_QUESTIONS = 5
-MAX_HISTORY = 6  # 3 échanges complets (user + assistant)
+MAX_HISTORY = 6
 
 PRICE_ONLY_KEYWORDS = [
     "cours", "prix", "price", "combien", "coute", "vaut", "valeur",
     "cote", "coté", "tarif", "quote", "rate"
 ]
+
+TP_REPARTITION = [0.40, 0.25, 0.15, 0.10, 0.05, 0.03, 0.02]
+
+BROKERS = ["Vantage", "VT Markets", "StarTrader", "ACY Trading", "Puprime", "Autre"]
 
 def is_price_only_request(text):
     text_lower = text.lower()
@@ -59,10 +65,18 @@ def init_db():
             stripe_customer_id TEXT,
             subscription_id TEXT,
             plan TEXT,
+            broker TEXT,
+            capital FLOAT,
+            onboarding_step INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW()
         )
     """)
+    for col in ["broker TEXT", "capital FLOAT", "onboarding_step INTEGER DEFAULT 0"]:
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS " + col)
+        except:
+            pass
     cur.execute("""
         CREATE TABLE IF NOT EXISTS conversation_history (
             id SERIAL PRIMARY KEY,
@@ -72,10 +86,80 @@ def init_db():
             created_at TIMESTAMP DEFAULT NOW()
         )
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS pending_signals (
+            telegram_id BIGINT PRIMARY KEY,
+            signal_text TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
     conn.commit()
     cur.close()
     conn.close()
     print("BDD initialisee !")
+
+def get_user(user_id):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT telegram_id, is_premium, question_count, stripe_customer_id, subscription_id, plan, broker, capital, onboarding_step FROM users WHERE telegram_id = %s", (user_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row:
+            cols = ["telegram_id", "is_premium", "question_count", "stripe_customer_id", "subscription_id", "plan", "broker", "capital", "onboarding_step"]
+            return dict(zip(cols, row))
+        return None
+    except:
+        return None
+
+def set_onboarding_step(user_id, step):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO users (telegram_id, onboarding_step)
+            VALUES (%s, %s)
+            ON CONFLICT (telegram_id)
+            DO UPDATE SET onboarding_step = %s, updated_at = NOW()
+        """, (user_id, step, step))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except:
+        pass
+
+def set_broker(user_id, broker):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO users (telegram_id, broker)
+            VALUES (%s, %s)
+            ON CONFLICT (telegram_id)
+            DO UPDATE SET broker = %s, updated_at = NOW()
+        """, (user_id, broker, broker))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except:
+        pass
+
+def set_capital(user_id, capital):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO users (telegram_id, capital)
+            VALUES (%s, %s)
+            ON CONFLICT (telegram_id)
+            DO UPDATE SET capital = %s, updated_at = NOW()
+        """, (user_id, capital, capital))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except:
+        pass
 
 def is_premium(user_id):
     try:
@@ -149,19 +233,12 @@ def save_message(user_id, role, content):
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO conversation_history (telegram_id, role, content)
-            VALUES (%s, %s, %s)
-        """, (user_id, role, content))
-        # Garde seulement les MAX_HISTORY derniers messages
+        cur.execute("INSERT INTO conversation_history (telegram_id, role, content) VALUES (%s, %s, %s)", (user_id, role, content))
         cur.execute("""
             DELETE FROM conversation_history
-            WHERE telegram_id = %s
-            AND id NOT IN (
-                SELECT id FROM conversation_history
-                WHERE telegram_id = %s
-                ORDER BY created_at DESC
-                LIMIT %s
+            WHERE telegram_id = %s AND id NOT IN (
+                SELECT id FROM conversation_history WHERE telegram_id = %s
+                ORDER BY created_at DESC LIMIT %s
             )
         """, (user_id, user_id, MAX_HISTORY))
         conn.commit()
@@ -174,11 +251,7 @@ def get_history(user_id):
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("""
-            SELECT role, content FROM conversation_history
-            WHERE telegram_id = %s
-            ORDER BY created_at ASC
-        """, (user_id,))
+        cur.execute("SELECT role, content FROM conversation_history WHERE telegram_id = %s ORDER BY created_at ASC", (user_id,))
         rows = cur.fetchall()
         cur.close()
         conn.close()
@@ -196,6 +269,121 @@ def clear_history(user_id):
         conn.close()
     except:
         pass
+
+def save_pending_signal(user_id, signal_text):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO pending_signals (telegram_id, signal_text)
+            VALUES (%s, %s)
+            ON CONFLICT (telegram_id)
+            DO UPDATE SET signal_text = %s, created_at = NOW()
+        """, (user_id, signal_text, signal_text))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except:
+        pass
+
+def get_pending_signal(user_id):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT signal_text FROM pending_signals WHERE telegram_id = %s", (user_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return row[0] if row else None
+    except:
+        return None
+
+def delete_pending_signal(user_id):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM pending_signals WHERE telegram_id = %s", (user_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except:
+        pass
+
+def is_trading_signal(text):
+    keywords = ["SELL", "BUY", "Stop Loss", "Take Profit", "TP", "SL", "BTCUSD", "XAUUSD", "EURUSD"]
+    return sum(1 for k in keywords if k.upper() in text.upper()) >= 3
+
+def parse_signal(text):
+    signal = {}
+    if "SELL" in text.upper():
+        signal["direction"] = "SELL"
+    elif "BUY" in text.upper():
+        signal["direction"] = "BUY"
+    assets = ["BTCUSD", "ETHUSD", "XAUUSD", "EURUSD", "GBPUSD", "SOLUSDT", "XRPUSD"]
+    for asset in assets:
+        if asset.upper() in text.upper():
+            signal["asset"] = asset
+            break
+    sl_match = re.search(r"Stop Loss\s*:?\s*([\d,\.]+)", text, re.IGNORECASE)
+    if sl_match:
+        signal["sl"] = float(sl_match.group(1).replace(",", ""))
+    entry_match = re.search(r"(\d[\d,\.]+)\s*[-–]\s*(\d[\d,\.]+)", text)
+    if entry_match:
+        signal["entry_low"] = float(entry_match.group(1).replace(",", ""))
+        signal["entry_high"] = float(entry_match.group(2).replace(",", ""))
+        signal["entry_mid"] = (signal["entry_low"] + signal["entry_high"]) / 2
+    tp_matches = re.findall(r"^\s*\d+\.\s*([\d,\.]+)", text, re.MULTILINE)
+    if tp_matches:
+        signal["tps"] = [float(tp.replace(",", "")) for tp in tp_matches]
+    return signal
+
+def calculate_lots(capital, signal):
+    if not signal.get("sl") or not signal.get("entry_mid") or not signal.get("tps"):
+        return None
+    entry = signal["entry_mid"]
+    sl = signal["sl"]
+    sl_pips = abs(entry - sl)
+    tps = signal["tps"]
+    result = []
+    for i, tp in enumerate(tps):
+        pct = TP_REPARTITION[i] if i < len(TP_REPARTITION) else 0.02
+        capital_tp = capital * pct
+        if sl_pips > 0:
+            lot = capital_tp / (sl_pips * 1)
+            lot = max(0.01, round(lot / 0.01) * 0.01)
+        else:
+            lot = 0.01
+        tp_pips = abs(tp - entry)
+        rr = round(tp_pips / sl_pips, 1) if sl_pips > 0 else 0
+        result.append({
+            "tp_num": i + 1,
+            "tp_price": tp,
+            "lot": lot,
+            "pct": int(pct * 100),
+            "rr": rr,
+            "optional": i >= 3
+        })
+    return result
+
+def format_signal_with_lots(signal, lots, capital, broker=""):
+    direction = signal.get("direction", "")
+    asset = signal.get("asset", "")
+    entry_low = signal.get("entry_low", "")
+    entry_high = signal.get("entry_high", "")
+    sl = signal.get("sl", "")
+    emoji = "📈" if direction == "BUY" else "📉"
+    broker_str = " — " + broker if broker else ""
+    msg = emoji + " *" + direction + " " + asset + "* — " + str(capital) + "€" + broker_str + "\n"
+    msg += "💰 Entrée : " + str(entry_low) + " - " + str(entry_high) + "\n"
+    msg += "🔐 Stop Loss : " + str(sl) + "\n\n"
+    msg += "📊 *Tailles de lot par TP :*\n\n"
+    for tp in lots:
+        optional_tag = " _(optionnel)_" if tp["optional"] else ""
+        msg += "TP" + str(tp["tp_num"]) + " — " + str(tp["tp_price"]) + "\n"
+        msg += "   • Lot : *" + str(tp["lot"]) + "* (" + str(tp["pct"]) + "%)" + optional_tag + "\n"
+        msg += "   • R/R : 1:" + str(tp["rr"]) + "\n\n"
+    msg += "⚠️ _Tailles indicatives — adaptez selon votre levier_"
+    return msg
 
 CRYPTO_IDS = {
     "btc": "bitcoin", "bitcoin": "bitcoin",
@@ -294,7 +482,7 @@ def get_index_price(yahoo_symbol, label):
 def get_live_prices_context():
     prices = {}
     try:
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,ripple,solana&vs_currencies=usd&include_24hr_change=true"
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,ripple,solana&vs_currencies=usd"
         r = requests.get(url, timeout=5)
         data = r.json()
         prices["BTC"] = data["bitcoin"]["usd"]
@@ -324,30 +512,24 @@ def get_live_prices_context():
 def detect_asset(text):
     text_lower = text.lower()
     words = text_lower.split()
-
     for or_word in OR_WORDS:
         if or_word in ["xauusd", "xau/usd", "xau"]:
             if or_word in text_lower:
                 return ("commodity", "XAU", "or")
         if or_word in words or ("l'or" in text_lower) or ("du or" in text_lower):
             return ("commodity", "XAU", "or")
-
     for keyword, sym in COMMODITY_KEYWORDS.items():
         if keyword in text_lower:
             return ("commodity", sym, keyword)
-
     for keyword, coin_id in CRYPTO_IDS.items():
         if keyword in text_lower:
             return ("crypto", coin_id, keyword)
-
     for keyword, (fc, tc) in FOREX_SYMBOLS.items():
         if keyword in text_lower:
             return ("forex", (fc, tc), keyword)
-
     for keyword, sym in INDEX_SYMBOLS.items():
         if keyword in text_lower:
             return ("index", sym, keyword)
-
     return None
 
 def create_checkout_session(user_id, price_id, plan_name):
@@ -387,6 +569,16 @@ def download_image_as_base64(file_id):
         return base64.b64encode(r.content).decode("utf-8")
     except:
         return None
+
+def send_broker_keyboard(user_id):
+    keyboard = telebot.types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True, one_time_keyboard=True)
+    keyboard.add(*[telebot.types.KeyboardButton(b) for b in BROKERS])
+    bot.send_message(
+        user_id,
+        "🏦 *Quel broker utilisez-vous ?*\n\n_Sélectionnez votre broker dans la liste :_",
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
 
 @app.route("/webhook", methods=["POST"])
 def stripe_webhook():
@@ -437,29 +629,85 @@ def stripe_webhook():
 def health():
     return "AutoTrade Bot is running!", 200
 
+@bot.channel_post_handler(func=lambda message: True)
+def handle_channel_post(message):
+    if message.chat.id != CANAL_ID:
+        return
+    if not message.text:
+        return
+    if not is_trading_signal(message.text):
+        return
+    members = get_all_premium()
+    for member in members:
+        user_id = member[0]
+        user = get_user(user_id)
+        save_pending_signal(user_id, message.text)
+        try:
+            if user and user.get("capital") and user.get("broker"):
+                signal = parse_signal(message.text)
+                lots = calculate_lots(user["capital"], signal)
+                if lots:
+                    result = format_signal_with_lots(signal, lots, user["capital"], user["broker"])
+                    bot.send_message(user_id, "📡 *Nouveau signal !*\n\n" + result, parse_mode="Markdown")
+                    delete_pending_signal(user_id)
+                else:
+                    bot.send_message(user_id, "📡 *Nouveau signal !*\n\n" + message.text + "\n\n💰 Quel capital pour ce trade ?", parse_mode="Markdown")
+            else:
+                bot.send_message(user_id, "📡 *Nouveau signal !*\n\n" + message.text + "\n\n💰 Quel capital pour ce trade ? (ex: 1000)", parse_mode="Markdown")
+        except:
+            pass
+
 @bot.message_handler(commands=["start"])
 def send_welcome(message):
-    clear_history(message.from_user.id)
-    welcome = """👋 *Bienvenue sur AutoTrade Bot !*
+    user_id = message.from_user.id
+    clear_history(user_id)
+    set_onboarding_step(user_id, 1)
+
+    bot.send_message(user_id, """👋 *Bienvenue sur AutoTrade Bot !*
 
 Je suis votre assistant trading personnel, disponible 24h/24 et 7j/7.
 
 💹 *Ce que je peux faire pour vous :*
 
 ✅ Prix en temps réel — Crypto, Forex, Or, Indices
+✅ Signaux automatiques avec calcul de lots
 ✅ Analyse de vos graphiques TradingView
-✅ Calcul de lot adapté à votre capital
 ✅ Niveaux clés — Support, Résistance, Objectifs
 ✅ Gestion du risque personnalisée
 
-📌 *Comment ça marche ?*
-Posez votre question en texte ou envoyez directement un screenshot de votre graphique.
+_Avant de commencer, j'ai besoin de 2 informations rapides_ 👇""", parse_mode="Markdown")
 
-🎁 *5 questions offertes* pour découvrir le service.
-Passez en *Premium* pour un accès illimité avec /abonnement
+    time.sleep(1)
+    send_broker_keyboard(user_id)
 
-_Bonne trading ! 📈_"""
-    bot.reply_to(message, welcome, parse_mode="Markdown")
+@bot.message_handler(commands=["profil"])
+def show_profil(message):
+    user_id = message.from_user.id
+    user = get_user(user_id)
+    if not user:
+        bot.reply_to(message, "Aucun profil trouvé. Tapez /start pour commencer.")
+        return
+    broker = user.get("broker") or "Non renseigné"
+    capital = user.get("capital")
+    capital_str = str(capital) + "€" if capital else "Non renseigné"
+    premium = "✅ Premium" if user.get("is_premium") else "❌ Gratuit"
+    msg = "👤 *Votre profil :*\n\n"
+    msg += "🏦 Broker : *" + broker + "*\n"
+    msg += "💰 Capital : *" + capital_str + "*\n"
+    msg += "⭐ Statut : *" + premium + "*\n\n"
+    msg += "_Pour modifier : /broker ou /capital_"
+    bot.reply_to(message, msg, parse_mode="Markdown")
+
+@bot.message_handler(commands=["broker"])
+def change_broker(message):
+    set_onboarding_step(message.from_user.id, 1)
+    send_broker_keyboard(message.from_user.id)
+
+@bot.message_handler(commands=["capital"])
+def change_capital(message):
+    set_onboarding_step(message.from_user.id, 2)
+    keyboard = telebot.types.ReplyKeyboardRemove()
+    bot.send_message(message.from_user.id, "💰 *Quel est votre capital de trading ?*\n_(ex: 1000 pour 1000€)_", parse_mode="Markdown", reply_markup=keyboard)
 
 @bot.message_handler(commands=["abonnement"])
 def send_subscription(message):
@@ -473,7 +721,7 @@ def send_subscription(message):
 @bot.message_handler(commands=["nouveau"])
 def new_conversation(message):
     clear_history(message.from_user.id)
-    bot.reply_to(message, "🔄 Nouvelle conversation démarrée ! Comment puis-je vous aider ?")
+    bot.reply_to(message, "🔄 Nouvelle conversation démarrée !")
 
 @bot.message_handler(commands=["premium"])
 def activate_premium(message):
@@ -525,7 +773,10 @@ def list_members(message):
         return
     msg = "👥 *Membres Premium :*\n\n"
     for m in members:
-        msg += "• ID: " + str(m[0]) + " — Plan: " + str(m[1]) + "\n"
+        user = get_user(m[0])
+        broker = user.get("broker", "?") if user else "?"
+        capital = str(user.get("capital", "?")) + "€" if user and user.get("capital") else "?"
+        msg += "• ID: " + str(m[0]) + " — " + str(m[1]) + " — " + broker + " — " + capital + "\n"
     bot.reply_to(message, msg, parse_mode="Markdown")
 
 @bot.message_handler(content_types=["photo"])
@@ -557,11 +808,16 @@ def handle_photo(message):
         for symbol, price in live_prices.items():
             prices_context += "- " + symbol + ": $" + "{:,.2f}".format(price) + "\n"
 
+        user = get_user(user_id)
+        user_context = ""
+        if user and user.get("broker"):
+            user_context += "Broker : " + user["broker"] + "\n"
+        if user and user.get("capital"):
+            user_context += "Capital : " + str(user["capital"]) + "€\n"
+
         caption = message.caption or "Analyse ce screenshot de trading. Sois concis et direct. Donne les infos cles : actif, direction, niveaux importants. Si capital mentionne, calcule le lot (min 0.01). IMPORTANT: Les chiffres de vues/likes/reactions ne sont pas des prix ni des dates."
+        full_prompt = prices_context + "\n" + user_context + "\n" + caption
 
-        full_prompt = prices_context + "\n\n" + caption
-
-        # Historique de conversation
         history = get_history(user_id)
         messages_with_history = history + [
             {"role": "user", "content": [
@@ -573,13 +829,11 @@ def handle_photo(message):
         response = client.messages.create(
             model="claude-opus-4-5",
             max_tokens=600,
-            system="Tu es un expert en trading concis. Reponds UNIQUEMENT a ce qui est demande. Utilise TOUJOURS les prix en temps reel fournis. Pour les calculs de lots, minimum 0.01 lot. Les chiffres de vues/likes ne sont pas des prix ni des dates. Reponds en francais. Tu as acces a l historique de la conversation pour garder le contexte.",
+            system="Tu es un expert en trading concis. Reponds UNIQUEMENT a ce qui est demande. Utilise TOUJOURS les prix en temps reel fournis. Pour les calculs de lots, minimum 0.01 lot. Tiens compte du broker et capital si fournis. Les chiffres de vues/likes ne sont pas des prix ni des dates. Reponds en francais.",
             messages=messages_with_history,
         )
 
         answer = response.content[0].text
-
-        # Sauvegarde dans l'historique
         save_message(user_id, "user", "[Screenshot] " + caption)
         save_message(user_id, "assistant", answer)
 
@@ -595,6 +849,66 @@ def handle_photo(message):
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     user_id = message.from_user.id
+    user = get_user(user_id)
+    onboarding_step = user.get("onboarding_step", 0) if user else 0
+
+    # Onboarding étape 1 : broker
+    if onboarding_step == 1:
+        broker = message.text.strip()
+        if broker not in BROKERS:
+            send_broker_keyboard(user_id)
+            return
+        set_broker(user_id, broker)
+        set_onboarding_step(user_id, 2)
+        keyboard = telebot.types.ReplyKeyboardRemove()
+        bot.send_message(
+            user_id,
+            "✅ Broker enregistré : *" + broker + "*\n\n💰 *Quel est votre capital de trading ?*\n_(Entrez un montant en euros, ex: 1000)_",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        return
+
+    # Onboarding étape 2 : capital
+    if onboarding_step == 2:
+        try:
+            capital = float(message.text.strip().replace("€", "").replace(",", ".").replace(" ", ""))
+            if capital <= 0:
+                raise ValueError
+            set_capital(user_id, capital)
+            set_onboarding_step(user_id, 0)
+            user = get_user(user_id)
+            broker = user.get("broker", "") if user else ""
+            bot.send_message(
+                user_id,
+                "✅ *Profil configuré avec succès !*\n\n🏦 Broker : *" + broker + "*\n💰 Capital : *" + str(capital) + "€*\n\n_Vous pouvez modifier ces infos à tout moment avec /broker ou /capital_\n\n🎁 Vous avez *5 questions gratuites*.\nPostez votre question ou screenshot ! 📈",
+                parse_mode="Markdown"
+            )
+        except:
+            bot.send_message(user_id, "⚠️ Veuillez entrer un montant valide (ex: 1000)")
+        return
+
+    # Signal en attente
+    pending = get_pending_signal(user_id)
+    if pending:
+        try:
+            capital_input = float(message.text.strip().replace("€", "").replace(",", "."))
+            if capital_input > 0:
+                signal = parse_signal(pending)
+                broker = user.get("broker", "") if user else ""
+                lots = calculate_lots(capital_input, signal)
+                if lots:
+                    result = format_signal_with_lots(signal, lots, capital_input, broker)
+                    delete_pending_signal(user_id)
+                    bot.reply_to(message, result, parse_mode="Markdown")
+                    return
+                else:
+                    delete_pending_signal(user_id)
+                    bot.reply_to(message, "⚠️ Impossible de calculer les lots pour ce signal.")
+                    return
+        except ValueError:
+            delete_pending_signal(user_id)
+
     count = get_question_count(user_id)
 
     if not is_premium(user_id) and count >= MAX_FREE_QUESTIONS:
@@ -634,23 +948,28 @@ def handle_message(message):
         return
 
     try:
+        user_context = ""
+        if user and user.get("broker"):
+            user_context += "Broker : " + user["broker"] + ". "
+        if user and user.get("capital"):
+            user_context += "Capital : " + str(user["capital"]) + "€. "
+
         user_content = message.text
         if price_info:
             user_content = message.text + "\n\n[DONNEES EN TEMPS REEL: " + price_info + "]"
+        if user_context:
+            user_content = "[PROFIL: " + user_context + "]\n\n" + user_content
 
-        # Historique de conversation
         history = get_history(user_id)
         messages_with_history = history + [{"role": "user", "content": user_content}]
 
         response = client.messages.create(
             model="claude-opus-4-5",
             max_tokens=500,
-            system="Tu es un assistant trading expert et concis. Reponds UNIQUEMENT a ce qui est demande. Si on te demande un cours, utilise UNIQUEMENT le prix fourni dans les donnees en temps reel. Pour les calculs de lots, minimum 0.01 lot sur MT5 et brokers standards. Reponds en francais. Tu as acces a l historique de la conversation pour garder le contexte — utilise-le pour des reponses coherentes.",
+            system="Tu es un assistant trading expert et concis. Reponds UNIQUEMENT a ce qui est demande. Si on te demande un cours, utilise UNIQUEMENT le prix fourni. Pour les calculs de lots, minimum 0.01 lot. Tiens compte du broker et capital si fournis. Reponds en francais. Utilise l historique pour garder le contexte.",
             messages=messages_with_history,
         )
         answer = response.content[0].text
-
-        # Sauvegarde dans l'historique
         save_message(user_id, "user", user_content)
         save_message(user_id, "assistant", answer)
 
