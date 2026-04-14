@@ -233,30 +233,25 @@ def detect_asset(text):
     text_lower = text.lower()
     words = text_lower.split()
 
-    # Détection or uniquement sur mots exacts
     for or_word in OR_WORDS:
-        if or_word in text_lower.split() or or_word in text_lower:
-            if or_word in ["xauusd", "xau/usd", "xau"]:
+        if or_word in ["xauusd", "xau/usd", "xau"]:
+            if or_word in text_lower:
                 return ("commodity", "XAU", "or")
-            if or_word in words or ("l'or" in text_lower) or ("du or" in text_lower):
-                return ("commodity", "XAU", "or")
+        if or_word in words or ("l'or" in text_lower) or ("du or" in text_lower):
+            return ("commodity", "XAU", "or")
 
-    # Autres matières premières
     for keyword, sym in COMMODITY_KEYWORDS.items():
         if keyword in text_lower:
             return ("commodity", sym, keyword)
 
-    # Crypto
     for keyword, coin_id in CRYPTO_IDS.items():
         if keyword in text_lower:
             return ("crypto", coin_id, keyword)
 
-    # Forex
     for keyword, (fc, tc) in FOREX_SYMBOLS.items():
         if keyword in text_lower:
             return ("forex", (fc, tc), keyword)
 
-    # Indices
     for keyword, sym in INDEX_SYMBOLS.items():
         if keyword in text_lower:
             return ("index", sym, keyword)
@@ -351,7 +346,25 @@ def health():
 
 @bot.message_handler(commands=["start"])
 def send_welcome(message):
-    welcome = "👋 *Bienvenue sur AutoTrade Bot !*\n\nJe suis votre assistant trading alimenté par Claude AI.\n\n✅ Crypto en temps réel (BTC, ETH, SOL...)\n✅ Forex en temps réel (EUR/USD, GBP/USD...)\n✅ Matières premières (Or, Argent)\n✅ Indices (Nasdaq, S&P500, CAC40...)\n✅ Analyse de screenshots de trades\n✅ Calcul de lots (min 0.01)\n\nVous avez droit à *5 questions gratuites*.\n\nPostez votre question ou screenshot ! 📈"
+    welcome = """👋 *Bienvenue sur AutoTrade Bot !*
+
+Je suis votre assistant trading personnel, disponible 24h/24 et 7j/7.
+
+💹 *Ce que je peux faire pour vous :*
+
+✅ Prix en temps réel — Crypto, Forex, Or, Indices
+✅ Analyse de vos graphiques TradingView
+✅ Calcul de lot adapté à votre capital
+✅ Niveaux clés — Support, Résistance, Objectifs
+✅ Gestion du risque personnalisée
+
+📌 *Comment ça marche ?*
+Posez votre question en texte ou envoyez directement un screenshot de votre graphique.
+
+🎁 *5 questions offertes* pour découvrir le service.
+Passez en *Premium* pour un accès illimité avec /abonnement
+
+_Bonne trading ! 📈_"""
     bot.reply_to(message, welcome, parse_mode="Markdown")
 
 @bot.message_handler(commands=["abonnement"])
@@ -430,7 +443,7 @@ def handle_photo(message):
         count += 1
 
     remaining = MAX_FREE_QUESTIONS - count
-    bot.reply_to(message, "🔍 Analyse du screenshot en cours...")
+    bot.reply_to(message, "🔍 Analyse du graphique en cours...")
 
     try:
         file_id = message.photo[-1].file_id
@@ -491,7 +504,6 @@ def handle_message(message):
         if price_data:
             price_info = "📡 *Prix en temps réel :*\n" + price_data + "\n\n"
 
-    # Si c'est juste une demande de prix, retourner uniquement le prix sans Claude
     if price_info and is_price_only_request(message.text):
         if is_premium(user_id):
             footer = "\n\n_✨ Membre Premium_"
