@@ -28,6 +28,7 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 app = Flask(__name__)
 
 MAX_FREE_QUESTIONS = 5
+MAX_HISTORY = 6  # 3 échanges complets (user + assistant)
 
 PRICE_ONLY_KEYWORDS = [
     "cours", "prix", "price", "combien", "coute", "vaut", "valeur",
@@ -60,6 +61,15 @@ def init_db():
             plan TEXT,
             created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS conversation_history (
+            id SERIAL PRIMARY KEY,
+            telegram_id BIGINT,
+            role TEXT,
+            content TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
         )
     """)
     conn.commit()
@@ -135,6 +145,58 @@ def get_all_premium():
     except:
         return []
 
+def save_message(user_id, role, content):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO conversation_history (telegram_id, role, content)
+            VALUES (%s, %s, %s)
+        """, (user_id, role, content))
+        # Garde seulement les MAX_HISTORY derniers messages
+        cur.execute("""
+            DELETE FROM conversation_history
+            WHERE telegram_id = %s
+            AND id NOT IN (
+                SELECT id FROM conversation_history
+                WHERE telegram_id = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+            )
+        """, (user_id, user_id, MAX_HISTORY))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except:
+        pass
+
+def get_history(user_id):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT role, content FROM conversation_history
+            WHERE telegram_id = %s
+            ORDER BY created_at ASC
+        """, (user_id,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [{"role": row[0], "content": row[1]} for row in rows]
+    except:
+        return []
+
+def clear_history(user_id):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM conversation_history WHERE telegram_id = %s", (user_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except:
+        pass
+
 CRYPTO_IDS = {
     "btc": "bitcoin", "bitcoin": "bitcoin",
     "eth": "ethereum", "ethereum": "ethereum",
@@ -178,9 +240,9 @@ def get_crypto_price(coin_id, symbol):
         price_eur = data[coin_id]["eur"]
         change = data[coin_id]["usd_24h_change"]
         emoji = "🟢" if change >= 0 else "🔴"
-        return emoji + " *" + symbol.upper() + "*\n💵 $" + "{:,.2f}".format(price_usd) + " USD\n💶 €" + "{:,.2f}".format(price_eur) + " EUR\n📊 24h: " + "{:+.2f}".format(change) + "%", price_usd
+        return emoji + " *" + symbol.upper() + "*\n💵 $" + "{:,.2f}".format(price_usd) + " USD\n💶 €" + "{:,.2f}".format(price_eur) + " EUR\n📊 24h: " + "{:+.2f}".format(change) + "%"
     except:
-        return None, None
+        return None
 
 def get_forex_price(from_currency, to_currency):
     try:
@@ -230,7 +292,6 @@ def get_index_price(yahoo_symbol, label):
         return None
 
 def get_live_prices_context():
-    """Récupère les prix en temps réel pour enrichir le contexte des screenshots"""
     prices = {}
     try:
         url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,ripple,solana&vs_currencies=usd&include_24hr_change=true"
@@ -362,6 +423,7 @@ def stripe_webhook():
             if row:
                 user_id = row[0]
                 set_premium(user_id, False)
+                clear_history(user_id)
                 try:
                     bot.send_message(user_id, "❌ Votre abonnement AutoTrade a été annulé.\n\nVous pouvez vous réabonner avec /abonnement.", parse_mode="Markdown")
                 except:
@@ -377,6 +439,7 @@ def health():
 
 @bot.message_handler(commands=["start"])
 def send_welcome(message):
+    clear_history(message.from_user.id)
     welcome = """👋 *Bienvenue sur AutoTrade Bot !*
 
 Je suis votre assistant trading personnel, disponible 24h/24 et 7j/7.
@@ -407,6 +470,11 @@ def send_subscription(message):
     msg = get_blocked_message(user_id)
     bot.reply_to(message, msg, parse_mode="Markdown", disable_web_page_preview=True)
 
+@bot.message_handler(commands=["nouveau"])
+def new_conversation(message):
+    clear_history(message.from_user.id)
+    bot.reply_to(message, "🔄 Nouvelle conversation démarrée ! Comment puis-je vous aider ?")
+
 @bot.message_handler(commands=["premium"])
 def activate_premium(message):
     user_id = message.from_user.id
@@ -436,6 +504,7 @@ def revoke_premium(message):
     if len(args) > 1:
         target_id = int(args[1])
         set_premium(target_id, False)
+        clear_history(target_id)
         bot.reply_to(message, "✅ Accès Premium révoqué pour " + str(target_id))
         try:
             bot.send_message(target_id, "❌ Votre accès test AutoTrade a été révoqué.", parse_mode="Markdown")
@@ -483,27 +552,37 @@ def handle_photo(message):
             bot.reply_to(message, "Impossible de lire l'image.")
             return
 
-        # Récupère les prix en temps réel pour enrichir le contexte
         live_prices = get_live_prices_context()
-        prices_context = "PRIX EN TEMPS REEL ACTUELS (utilise ces prix, pas ceux de ta memoire) :\n"
+        prices_context = "PRIX EN TEMPS REEL ACTUELS :\n"
         for symbol, price in live_prices.items():
             prices_context += "- " + symbol + ": $" + "{:,.2f}".format(price) + "\n"
 
-        caption = message.caption or "Analyse ce screenshot de trading. Sois concis et direct. Donne les infos cles : actif, direction, niveaux importants. Si capital mentionne, calcule le lot (min 0.01). IMPORTANT: Les chiffres que tu vois sur l'image qui ressemblent a des vues, likes ou reactions sociales (ex: 4, 27, 100) NE SONT PAS des prix ou des dates - ignore-les completement."
+        caption = message.caption or "Analyse ce screenshot de trading. Sois concis et direct. Donne les infos cles : actif, direction, niveaux importants. Si capital mentionne, calcule le lot (min 0.01). IMPORTANT: Les chiffres de vues/likes/reactions ne sont pas des prix ni des dates."
 
         full_prompt = prices_context + "\n\n" + caption
+
+        # Historique de conversation
+        history = get_history(user_id)
+        messages_with_history = history + [
+            {"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_base64}},
+                {"type": "text", "text": full_prompt}
+            ]}
+        ]
 
         response = client.messages.create(
             model="claude-opus-4-5",
             max_tokens=600,
-            system="Tu es un expert en trading concis. Reponds UNIQUEMENT a ce qui est demande. Utilise TOUJOURS les prix en temps reel fournis dans le contexte — ne jamais inventer ou approximer un prix. Pour les calculs de lots, minimum 0.01 lot (MT5, Vantage, StarTrader, VT Markets). Les chiffres de vues/likes/reactions sur les screenshots ne sont pas des prix ni des dates. Reponds en francais.",
-            messages=[{"role": "user", "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_base64}},
-                {"type": "text", "text": full_prompt}
-            ]}],
+            system="Tu es un expert en trading concis. Reponds UNIQUEMENT a ce qui est demande. Utilise TOUJOURS les prix en temps reel fournis. Pour les calculs de lots, minimum 0.01 lot. Les chiffres de vues/likes ne sont pas des prix ni des dates. Reponds en francais. Tu as acces a l historique de la conversation pour garder le contexte.",
+            messages=messages_with_history,
         )
 
         answer = response.content[0].text
+
+        # Sauvegarde dans l'historique
+        save_message(user_id, "user", "[Screenshot] " + caption)
+        save_message(user_id, "assistant", answer)
+
         if is_premium(user_id):
             footer = "\n\n_✨ Membre Premium_"
         else:
@@ -534,7 +613,7 @@ def handle_message(message):
     if asset:
         asset_type, symbol, keyword = asset
         if asset_type == "crypto":
-            price_data, _ = get_crypto_price(symbol, keyword)
+            price_data = get_crypto_price(symbol, keyword)
         elif asset_type == "forex":
             price_data = get_forex_price(symbol[0], symbol[1])
         elif asset_type == "commodity":
@@ -559,13 +638,22 @@ def handle_message(message):
         if price_info:
             user_content = message.text + "\n\n[DONNEES EN TEMPS REEL: " + price_info + "]"
 
+        # Historique de conversation
+        history = get_history(user_id)
+        messages_with_history = history + [{"role": "user", "content": user_content}]
+
         response = client.messages.create(
             model="claude-opus-4-5",
             max_tokens=500,
-            system="Tu es un assistant trading expert et concis. Reponds UNIQUEMENT a ce qui est demande. Si on te demande un cours, utilise UNIQUEMENT le prix fourni dans les donnees en temps reel. Pour les calculs de lots, minimum 0.01 lot sur MT5 et brokers standards. Ne jamais suggerer moins de 0.01. Reponds en francais. Ne dis JAMAIS que tu n as pas acces aux donnees de marche.",
-            messages=[{"role": "user", "content": user_content}]
+            system="Tu es un assistant trading expert et concis. Reponds UNIQUEMENT a ce qui est demande. Si on te demande un cours, utilise UNIQUEMENT le prix fourni dans les donnees en temps reel. Pour les calculs de lots, minimum 0.01 lot sur MT5 et brokers standards. Reponds en francais. Tu as acces a l historique de la conversation pour garder le contexte — utilise-le pour des reponses coherentes.",
+            messages=messages_with_history,
         )
         answer = response.content[0].text
+
+        # Sauvegarde dans l'historique
+        save_message(user_id, "user", user_content)
+        save_message(user_id, "assistant", answer)
+
         if is_premium(user_id):
             footer = "\n\n_✨ Membre Premium_"
         else:
