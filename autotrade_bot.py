@@ -178,9 +178,9 @@ def get_crypto_price(coin_id, symbol):
         price_eur = data[coin_id]["eur"]
         change = data[coin_id]["usd_24h_change"]
         emoji = "🟢" if change >= 0 else "🔴"
-        return emoji + " *" + symbol.upper() + "*\n💵 $" + "{:,.2f}".format(price_usd) + " USD\n💶 €" + "{:,.2f}".format(price_eur) + " EUR\n📊 24h: " + "{:+.2f}".format(change) + "%"
+        return emoji + " *" + symbol.upper() + "*\n💵 $" + "{:,.2f}".format(price_usd) + " USD\n💶 €" + "{:,.2f}".format(price_eur) + " EUR\n📊 24h: " + "{:+.2f}".format(change) + "%", price_usd
     except:
-        return None
+        return None, None
 
 def get_forex_price(from_currency, to_currency):
     try:
@@ -228,6 +228,37 @@ def get_index_price(yahoo_symbol, label):
         return emoji + " *" + label.upper() + "*\n💵 " + "{:,.2f}".format(price) + "\n📊 24h: " + "{:+.2f}".format(change) + "%"
     except:
         return None
+
+def get_live_prices_context():
+    """Récupère les prix en temps réel pour enrichir le contexte des screenshots"""
+    prices = {}
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,ripple,solana&vs_currencies=usd&include_24hr_change=true"
+        r = requests.get(url, timeout=5)
+        data = r.json()
+        prices["BTC"] = data["bitcoin"]["usd"]
+        prices["ETH"] = data["ethereum"]["usd"]
+        prices["XRP"] = data["ripple"]["usd"]
+        prices["SOL"] = data["solana"]["usd"]
+    except:
+        pass
+    try:
+        url = "https://api.gold-api.com/price/XAU"
+        r = requests.get(url, timeout=5)
+        data = r.json()
+        prices["XAU"] = data["price"]
+    except:
+        pass
+    try:
+        url = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/EUR/USD"
+        r = requests.get(url, timeout=5)
+        data = r.json()
+        ask = data[0]["spreadProfilePrices"][0]["ask"]
+        bid = data[0]["spreadProfilePrices"][0]["bid"]
+        prices["EURUSD"] = (ask + bid) / 2
+    except:
+        pass
+    return prices
 
 def detect_asset(text):
     text_lower = text.lower()
@@ -452,13 +483,24 @@ def handle_photo(message):
             bot.reply_to(message, "Impossible de lire l'image.")
             return
 
-        caption = message.caption or "Analyse ce screenshot de trading. Sois concis et direct. Donne les infos cles : actif, direction, niveaux importants. Si capital mentionne, calcule le lot (min 0.01)."
+        # Récupère les prix en temps réel pour enrichir le contexte
+        live_prices = get_live_prices_context()
+        prices_context = "PRIX EN TEMPS REEL ACTUELS (utilise ces prix, pas ceux de ta memoire) :\n"
+        for symbol, price in live_prices.items():
+            prices_context += "- " + symbol + ": $" + "{:,.2f}".format(price) + "\n"
+
+        caption = message.caption or "Analyse ce screenshot de trading. Sois concis et direct. Donne les infos cles : actif, direction, niveaux importants. Si capital mentionne, calcule le lot (min 0.01). IMPORTANT: Les chiffres que tu vois sur l'image qui ressemblent a des vues, likes ou reactions sociales (ex: 4, 27, 100) NE SONT PAS des prix ou des dates - ignore-les completement."
+
+        full_prompt = prices_context + "\n\n" + caption
 
         response = client.messages.create(
             model="claude-opus-4-5",
             max_tokens=600,
-            system="Tu es un expert en trading concis. Reponds UNIQUEMENT a ce qui est demande. Pour les calculs de lots, minimum 0.01 lot (MT5, Vantage, StarTrader, VT Markets). Ne jamais suggerer moins de 0.01. Reponds en francais.",
-            messages=[{"role": "user", "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_base64}}, {"type": "text", "text": caption}]}],
+            system="Tu es un expert en trading concis. Reponds UNIQUEMENT a ce qui est demande. Utilise TOUJOURS les prix en temps reel fournis dans le contexte — ne jamais inventer ou approximer un prix. Pour les calculs de lots, minimum 0.01 lot (MT5, Vantage, StarTrader, VT Markets). Les chiffres de vues/likes/reactions sur les screenshots ne sont pas des prix ni des dates. Reponds en francais.",
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_base64}},
+                {"type": "text", "text": full_prompt}
+            ]}],
         )
 
         answer = response.content[0].text
@@ -492,7 +534,7 @@ def handle_message(message):
     if asset:
         asset_type, symbol, keyword = asset
         if asset_type == "crypto":
-            price_data = get_crypto_price(symbol, keyword)
+            price_data, _ = get_crypto_price(symbol, keyword)
         elif asset_type == "forex":
             price_data = get_forex_price(symbol[0], symbol[1])
         elif asset_type == "commodity":
