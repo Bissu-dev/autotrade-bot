@@ -30,7 +30,7 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 app = Flask(__name__)
 
 MAX_FREE_QUESTIONS = 5
-MAX_HISTORY = 6
+MAX_HISTORY = 20  # 10 échanges complets
 
 PRICE_ONLY_KEYWORDS = [
     "cours", "prix", "price", "combien", "coute", "vaut", "valeur",
@@ -91,13 +91,21 @@ def init_db():
             plan TEXT,
             broker TEXT,
             capital FLOAT,
+            capital_initial FLOAT,
             risk_percent FLOAT DEFAULT 1.0,
             onboarding_step INTEGER DEFAULT 0,
+            alerte_danger_envoyee BOOLEAN DEFAULT FALSE,
+            alerte_profit_envoyee BOOLEAN DEFAULT FALSE,
             created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW()
         )
     """)
-    for col in ["broker TEXT", "capital FLOAT", "risk_percent FLOAT DEFAULT 1.0", "onboarding_step INTEGER DEFAULT 0"]:
+    for col in [
+        "broker TEXT", "capital FLOAT", "capital_initial FLOAT",
+        "risk_percent FLOAT DEFAULT 1.0", "onboarding_step INTEGER DEFAULT 0",
+        "alerte_danger_envoyee BOOLEAN DEFAULT FALSE",
+        "alerte_profit_envoyee BOOLEAN DEFAULT FALSE"
+    ]:
         try:
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS " + col)
         except:
@@ -127,12 +135,19 @@ def get_user(user_id):
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("SELECT telegram_id, is_premium, question_count, stripe_customer_id, subscription_id, plan, broker, capital, risk_percent, onboarding_step FROM users WHERE telegram_id = %s", (user_id,))
+        cur.execute("""
+            SELECT telegram_id, is_premium, question_count, stripe_customer_id,
+            subscription_id, plan, broker, capital, capital_initial, risk_percent,
+            onboarding_step, alerte_danger_envoyee, alerte_profit_envoyee
+            FROM users WHERE telegram_id = %s
+        """, (user_id,))
         row = cur.fetchone()
         cur.close()
         conn.close()
         if row:
-            cols = ["telegram_id", "is_premium", "question_count", "stripe_customer_id", "subscription_id", "plan", "broker", "capital", "risk_percent", "onboarding_step"]
+            cols = ["telegram_id", "is_premium", "question_count", "stripe_customer_id",
+                    "subscription_id", "plan", "broker", "capital", "capital_initial",
+                    "risk_percent", "onboarding_step", "alerte_danger_envoyee", "alerte_profit_envoyee"]
             return dict(zip(cols, row))
         return None
     except:
@@ -170,16 +185,24 @@ def set_broker(user_id, broker):
     except:
         pass
 
-def set_capital(user_id, capital):
+def set_capital(user_id, capital, is_initial=False):
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO users (telegram_id, capital)
-            VALUES (%s, %s)
-            ON CONFLICT (telegram_id)
-            DO UPDATE SET capital = %s, updated_at = NOW()
-        """, (user_id, capital, capital))
+        if is_initial:
+            cur.execute("""
+                INSERT INTO users (telegram_id, capital, capital_initial)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (telegram_id)
+                DO UPDATE SET capital = %s, capital_initial = %s, updated_at = NOW()
+            """, (user_id, capital, capital, capital, capital))
+        else:
+            cur.execute("""
+                INSERT INTO users (telegram_id, capital)
+                VALUES (%s, %s)
+                ON CONFLICT (telegram_id)
+                DO UPDATE SET capital = %s, updated_at = NOW()
+            """, (user_id, capital, capital))
         conn.commit()
         cur.close()
         conn.close()
@@ -201,6 +224,64 @@ def set_risk(user_id, risk_percent):
         conn.close()
     except:
         pass
+
+def check_and_send_alerts(user_id, capital_actuel):
+    try:
+        user = get_user(user_id)
+        if not user:
+            return
+
+        capital_initial = user.get("capital_initial") or capital_actuel
+        broker = user.get("broker", "?")
+        alerte_danger = user.get("alerte_danger_envoyee", False)
+        alerte_profit = user.get("alerte_profit_envoyee", False)
+
+        if capital_initial <= 0:
+            return
+
+        variation = ((capital_actuel - capital_initial) / capital_initial) * 100
+        perte = capital_initial - capital_actuel
+
+        # Alerte danger : capital < 250$ OU perte > 50%
+        if not alerte_danger and (capital_actuel < 250 or variation <= -50):
+            msg = "🔴 *ALERTE DANGER — Client en difficulté*\n\n"
+            msg += "👤 ID : " + str(user_id) + "\n"
+            msg += "🏦 Broker : " + broker + "\n"
+            msg += "💰 Capital initial : " + str(capital_initial) + "€\n"
+            msg += "📉 Capital actuel : " + str(capital_actuel) + "€\n"
+            msg += "📊 Variation : *" + "{:+.1f}".format(variation) + "%*\n"
+            if capital_actuel < 250:
+                msg += "⚠️ Capital sous 250€ — intervention recommandée"
+            else:
+                msg += "⚠️ Perte > 50% — intervention recommandée"
+            bot.send_message(ADMIN_ID, msg, parse_mode="Markdown")
+            # Marque l'alerte comme envoyée
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute("UPDATE users SET alerte_danger_envoyee = TRUE WHERE telegram_id = %s", (user_id,))
+            conn.commit()
+            cur.close()
+            conn.close()
+
+        # Alerte profit : gain > 100%
+        if not alerte_profit and variation >= 100:
+            msg = "🟢 *ALERTE PERFORMANCE — Client en forte progression*\n\n"
+            msg += "👤 ID : " + str(user_id) + "\n"
+            msg += "🏦 Broker : " + broker + "\n"
+            msg += "💰 Capital initial : " + str(capital_initial) + "€\n"
+            msg += "📈 Capital actuel : " + str(capital_actuel) + "€\n"
+            msg += "📊 Performance : *+" + "{:.1f}".format(variation) + "%*\n"
+            msg += "💡 À orienter vers une offre supérieure"
+            bot.send_message(ADMIN_ID, msg, parse_mode="Markdown")
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute("UPDATE users SET alerte_profit_envoyee = TRUE WHERE telegram_id = %s", (user_id,))
+            conn.commit()
+            cur.close()
+            conn.close()
+
+    except Exception as e:
+        print("Erreur alerte : " + str(e))
 
 def is_premium(user_id):
     try:
@@ -360,52 +441,38 @@ def is_trading_signal(text):
 def parse_signal(text):
     signal = {}
     text_upper = text.upper()
-
-    # Direction
     for d in SIGNAL_DIRECTIONS:
         if d in text_upper:
             signal["direction"] = "SELL" if d in ["SELL", "SHORT"] else "BUY"
             break
-
-    # Actif
     for keyword, normalized in SIGNAL_ASSETS.items():
         if keyword in text_upper:
             signal["asset"] = normalized
             break
-
-    # Stop Loss
     sl_match = re.search(r"Stop Loss\s*:?\s*([\d,\.]+)", text, re.IGNORECASE)
     if sl_match:
         signal["sl"] = float(sl_match.group(1).replace(",", ""))
-
-    # Zone d'entrée
     entry_match = re.search(r"(\d[\d,\.]+)\s*[-–]\s*(\d[\d,\.]+)", text)
     if entry_match:
         signal["entry_low"] = float(entry_match.group(1).replace(",", ""))
         signal["entry_high"] = float(entry_match.group(2).replace(",", ""))
         signal["entry_mid"] = (signal["entry_low"] + signal["entry_high"]) / 2
-
-    # Take Profits
     tp_matches = re.findall(r"^\s*\d+[\.\)]\s*([\d,\.]+)", text, re.MULTILINE)
     if tp_matches:
         signal["tps"] = [float(tp.replace(",", "")) for tp in tp_matches]
-
     return signal
 
 def calculate_lots(capital, risk_percent, signal):
     if not signal.get("sl") or not signal.get("entry_mid") or not signal.get("tps"):
         return None
-
     entry = signal["entry_mid"]
     sl = signal["sl"]
     sl_distance = abs(entry - sl)
     if sl_distance == 0:
         return None
-
     risque_total = capital * (risk_percent / 100)
     lot_total = risque_total / sl_distance
     lot_total = max(0.01, round(lot_total / 0.01) * 0.01)
-
     tps = signal["tps"]
     result = []
     for i, tp in enumerate(tps):
@@ -436,20 +503,17 @@ def format_signal_with_lots(signal, lots, capital, risk_percent, broker=""):
     emoji = "📈" if direction == "BUY" else "📉"
     broker_str = " — " + broker if broker else ""
     risque_total = round(capital * (risk_percent / 100), 2)
-
     msg = emoji + " *" + direction + " " + asset + "*" + broker_str + "\n"
     msg += "💰 Entrée : " + str(entry_low) + " - " + str(entry_high) + "\n"
     msg += "🔐 Stop Loss : " + str(sl) + "\n"
     msg += "💼 Capital : " + str(capital) + "€ | Risque : " + str(risk_percent) + "% (" + str(risque_total) + "€)\n\n"
     msg += "📊 *Tailles de lot par TP :*\n\n"
-
     for tp in lots:
         optional_tag = " _(optionnel)_" if tp["optional"] else ""
         msg += "TP" + str(tp["tp_num"]) + " — " + str(tp["tp_price"]) + optional_tag + "\n"
         msg += "   • Lot : *" + str(tp["lot"]) + "* (" + str(tp["pct"]) + "%)\n"
         msg += "   • Risque : " + str(tp["risque"]) + "€ | Gain potentiel : " + str(tp["gain"]) + "€\n"
         msg += "   • R/R : 1:" + str(tp["rr"]) + "\n\n"
-
     msg += "⚠️ _Tailles indicatives — adaptez selon votre levier_"
     return msg
 
@@ -716,17 +780,15 @@ def handle_channel_post(message):
         user = get_user(user_id)
         save_pending_signal(user_id, message.text)
         try:
-            if user and user.get("capital") and user.get("broker") and user.get("risk_percent"):
-                signal = parse_signal(message.text)
-                lots = calculate_lots(user["capital"], user["risk_percent"], signal)
-                if lots:
-                    result = format_signal_with_lots(signal, lots, user["capital"], user["risk_percent"], user["broker"])
-                    bot.send_message(user_id, "📡 *Nouveau signal !*\n\n" + result, parse_mode="Markdown")
-                    delete_pending_signal(user_id)
-                else:
-                    bot.send_message(user_id, "📡 *Nouveau signal !*\n\n" + message.text + "\n\n💰 Quel capital pour ce trade ?", parse_mode="Markdown")
-            else:
-                bot.send_message(user_id, "📡 *Nouveau signal !*\n\n" + message.text + "\n\n💰 Quel capital pour ce trade ? (ex: 1000)", parse_mode="Markdown")
+            # Toujours demander le capital actuel
+            capital_info = ""
+            if user and user.get("capital"):
+                capital_info = "\n_Dernier capital enregistré : " + str(user["capital"]) + "€_"
+            bot.send_message(
+                user_id,
+                "📡 *Nouveau signal !*\n\n" + message.text + "\n\n💰 *Quel est votre capital actuel ?*" + capital_info + "\n_(ex: 2000)_",
+                parse_mode="Markdown"
+            )
         except:
             pass
 
@@ -760,13 +822,23 @@ def show_profil(message):
         return
     broker = user.get("broker") or "Non renseigné"
     capital = user.get("capital")
+    capital_initial = user.get("capital_initial")
     risk = user.get("risk_percent") or 1.0
     capital_str = str(capital) + "€" if capital else "Non renseigné"
+    capital_initial_str = str(capital_initial) + "€" if capital_initial else "Non renseigné"
     risque_euros = round(capital * risk / 100, 2) if capital else 0
     premium = "✅ Premium" if user.get("is_premium") else "❌ Gratuit"
+
+    variation_str = ""
+    if capital and capital_initial and capital_initial > 0:
+        variation = ((capital - capital_initial) / capital_initial) * 100
+        variation_str = "\n📊 Performance : *" + "{:+.1f}".format(variation) + "%*"
+
     msg = "👤 *Votre profil :*\n\n"
     msg += "🏦 Broker : *" + broker + "*\n"
-    msg += "💰 Capital : *" + capital_str + "*\n"
+    msg += "💰 Capital initial : *" + capital_initial_str + "*\n"
+    msg += "💰 Capital actuel : *" + capital_str + "*"
+    msg += variation_str + "\n"
     msg += "📊 Risque : *" + str(risk) + "%* (" + str(risque_euros) + "€ par trade)\n"
     msg += "⭐ Statut : *" + premium + "*\n\n"
     msg += "_Modifier : /broker, /capital ou /risque_"
@@ -781,7 +853,7 @@ def change_broker(message):
 def change_capital(message):
     set_onboarding_step(message.from_user.id, 2)
     keyboard = telebot.types.ReplyKeyboardRemove()
-    bot.send_message(message.from_user.id, "💰 *Quel est votre capital de trading ?*\n_(ex: 2000 pour 2000€)_", parse_mode="Markdown", reply_markup=keyboard)
+    bot.send_message(message.from_user.id, "💰 *Quel est votre capital actuel ?*\n_(ex: 2000 pour 2000€)_", parse_mode="Markdown", reply_markup=keyboard)
 
 @bot.message_handler(commands=["risque"])
 def change_risk(message):
@@ -855,8 +927,13 @@ def list_members(message):
         user = get_user(m[0])
         broker = user.get("broker", "?") if user else "?"
         capital = str(user.get("capital", "?")) + "€" if user and user.get("capital") else "?"
+        capital_initial = user.get("capital_initial") if user else None
         risk = str(user.get("risk_percent", "?")) + "%" if user and user.get("risk_percent") else "?"
-        msg += "• ID: " + str(m[0]) + " — " + broker + " — " + capital + " — " + risk + "\n"
+        perf = ""
+        if user and user.get("capital") and capital_initial and capital_initial > 0:
+            variation = ((user["capital"] - capital_initial) / capital_initial) * 100
+            perf = " (" + "{:+.0f}".format(variation) + "%)"
+        msg += "• " + str(m[0]) + " — " + broker + " — " + capital + perf + " — " + risk + "\n"
     bot.reply_to(message, msg, parse_mode="Markdown")
 
 @bot.message_handler(content_types=["photo"])
@@ -911,7 +988,7 @@ def handle_photo(message):
         response = client.messages.create(
             model="claude-opus-4-5",
             max_tokens=600,
-            system="Tu es un expert en trading concis. Reponds UNIQUEMENT a ce qui est demande. Utilise TOUJOURS les prix en temps reel fournis. Pour les calculs de lots, minimum 0.01 lot. Tiens compte du broker, capital et % risque si fournis. Les chiffres de vues/likes ne sont pas des prix ni des dates. Reponds en francais.",
+            system="Tu es un expert en trading concis. Reponds UNIQUEMENT a ce qui est demande. Utilise TOUJOURS les prix en temps reel fournis. Pour les calculs de lots, minimum 0.01 lot. Tiens compte du broker, capital et % risque si fournis. Les chiffres de vues/likes ne sont pas des prix ni des dates. Reponds en francais. Tu te souviens du contexte des echanges precedents.",
             messages=messages_with_history,
         )
 
@@ -946,13 +1023,13 @@ def handle_message(message):
         bot.send_message(user_id, "✅ Broker : *" + broker + "*\n\n💰 *Quel est votre capital de trading ?*\n_(ex: 2000 pour 2000€)_", parse_mode="Markdown", reply_markup=keyboard)
         return
 
-    # Étape 2 : capital
+    # Étape 2 : capital initial
     if onboarding_step == 2:
         try:
             capital = float(message.text.strip().replace("€", "").replace(",", ".").replace(" ", ""))
             if capital <= 0:
                 raise ValueError
-            set_capital(user_id, capital)
+            set_capital(user_id, capital, is_initial=True)
             set_onboarding_step(user_id, 3)
             time.sleep(0.5)
             send_risk_keyboard(user_id)
@@ -1010,12 +1087,18 @@ def handle_message(message):
             bot.send_message(user_id, "⚠️ Entrez un nombre valide (ex: 3)")
         return
 
-    # Signal en attente
+    # Signal en attente — demande capital actuel
     pending = get_pending_signal(user_id)
     if pending:
         try:
             capital_input = float(message.text.strip().replace("€", "").replace(",", "."))
             if capital_input > 0:
+                # Met à jour le capital actuel
+                set_capital(user_id, capital_input, is_initial=False)
+
+                # Vérifie les alertes
+                check_and_send_alerts(user_id, capital_input)
+
                 signal = parse_signal(pending)
                 risk = user.get("risk_percent", 1.0) if user else 1.0
                 broker = user.get("broker", "") if user else ""
@@ -1075,7 +1158,7 @@ def handle_message(message):
         if user and user.get("broker"):
             user_context += "Broker : " + user["broker"] + ". "
         if user and user.get("capital"):
-            user_context += "Capital : " + str(user["capital"]) + "€. "
+            user_context += "Capital actuel : " + str(user["capital"]) + "€. "
         if user and user.get("risk_percent"):
             user_context += "Risque par trade : " + str(user["risk_percent"]) + "%. "
 
@@ -1091,7 +1174,7 @@ def handle_message(message):
         response = client.messages.create(
             model="claude-opus-4-5",
             max_tokens=500,
-            system="Tu es un assistant trading expert et concis. Reponds UNIQUEMENT a ce qui est demande. Si on te demande un cours, utilise UNIQUEMENT le prix fourni. Pour les calculs de lots, minimum 0.01 lot. Tiens compte du broker, capital et % risque si fournis. Reponds en francais. Utilise l historique pour garder le contexte.",
+            system="Tu es un assistant trading expert et concis. Reponds UNIQUEMENT a ce qui est demande. Si on te demande un cours, utilise UNIQUEMENT le prix fourni. Pour les calculs de lots, minimum 0.01 lot. Tiens compte du broker, capital et % risque si fournis. Reponds en francais. Tu te souviens du contexte des echanges precedents et tu gardes une conversation coherente et professionnelle.",
             messages=messages_with_history,
         )
         answer = response.content[0].text
