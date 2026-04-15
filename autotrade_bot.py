@@ -41,6 +41,30 @@ TP_REPARTITION = [0.40, 0.25, 0.15, 0.10, 0.05, 0.03, 0.02]
 BROKERS = ["Vantage", "VT Markets", "StarTrader", "ACY Trading", "Puprime", "Autre"]
 RISK_OPTIONS = ["1%", "2.5%", "5%", "10%", "Personnalisé"]
 
+SIGNAL_DIRECTIONS = ["SELL", "BUY", "LONG", "SHORT"]
+SIGNAL_ASSETS = {
+    "BTC": "BTCUSD", "BITCOIN": "BTCUSD", "BTCUSD": "BTCUSD",
+    "ETH": "ETHUSD", "ETHEREUM": "ETHUSD", "ETHUSD": "ETHUSD",
+    "SOL": "SOLUSD", "SOLANA": "SOLUSD", "SOLUSDT": "SOLUSD",
+    "XRP": "XRPUSD", "RIPPLE": "XRPUSD", "XRPUSD": "XRPUSD",
+    "ADA": "ADAUSD", "CARDANO": "ADAUSD",
+    "BNB": "BNBUSD", "BNBUSD": "BNBUSD",
+    "DOGE": "DOGEUSD", "DOGEUSD": "DOGEUSD",
+    "LTC": "LTCUSD", "LITECOIN": "LTCUSD",
+    "AVAX": "AVAXUSD", "AVAXUSD": "AVAXUSD",
+    "LINK": "LINKUSD", "LINKUSD": "LINKUSD",
+    "DOT": "DOTUSD", "DOTUSD": "DOTUSD",
+    "MATIC": "MATICUSD", "MATICUSD": "MATICUSD",
+    "XAU": "XAUUSD", "GOLD": "XAUUSD", "OR": "XAUUSD", "XAUUSD": "XAUUSD",
+    "XAG": "XAGUSD", "SILVER": "XAGUSD", "ARGENT": "XAGUSD",
+    "EUR": "EURUSD", "EURUSD": "EURUSD",
+    "GBP": "GBPUSD", "GBPUSD": "GBPUSD",
+    "NAS": "NASDAQ", "NASDAQ": "NASDAQ", "NAS100": "NASDAQ",
+    "DAX": "DAX", "CAC": "CAC40", "CAC40": "CAC40",
+    "SP500": "SP500", "SPX": "SP500",
+    "OIL": "OILUSD", "PETROLE": "OILUSD", "WTI": "OILUSD",
+}
+
 def is_price_only_request(text):
     text_lower = text.lower()
     has_price_keyword = any(w in text_lower for w in PRICE_ONLY_KEYWORDS)
@@ -327,31 +351,45 @@ def delete_pending_signal(user_id):
         pass
 
 def is_trading_signal(text):
-    keywords = ["SELL", "BUY", "Stop Loss", "Take Profit", "TP", "SL", "BTCUSD", "XAUUSD", "EURUSD"]
-    return sum(1 for k in keywords if k.upper() in text.upper()) >= 3
+    text_upper = text.upper()
+    has_direction = any(d in text_upper for d in SIGNAL_DIRECTIONS)
+    has_asset = any(a in text_upper for a in SIGNAL_ASSETS.keys())
+    has_sl = "STOP LOSS" in text_upper or "SL" in text_upper or "🔐" in text
+    return has_direction and has_asset and has_sl
 
 def parse_signal(text):
     signal = {}
-    if "SELL" in text.upper():
-        signal["direction"] = "SELL"
-    elif "BUY" in text.upper():
-        signal["direction"] = "BUY"
-    assets = ["BTCUSD", "ETHUSD", "XAUUSD", "EURUSD", "GBPUSD", "SOLUSDT", "XRPUSD"]
-    for asset in assets:
-        if asset.upper() in text.upper():
-            signal["asset"] = asset
+    text_upper = text.upper()
+
+    # Direction
+    for d in SIGNAL_DIRECTIONS:
+        if d in text_upper:
+            signal["direction"] = "SELL" if d in ["SELL", "SHORT"] else "BUY"
             break
+
+    # Actif
+    for keyword, normalized in SIGNAL_ASSETS.items():
+        if keyword in text_upper:
+            signal["asset"] = normalized
+            break
+
+    # Stop Loss
     sl_match = re.search(r"Stop Loss\s*:?\s*([\d,\.]+)", text, re.IGNORECASE)
     if sl_match:
         signal["sl"] = float(sl_match.group(1).replace(",", ""))
+
+    # Zone d'entrée
     entry_match = re.search(r"(\d[\d,\.]+)\s*[-–]\s*(\d[\d,\.]+)", text)
     if entry_match:
         signal["entry_low"] = float(entry_match.group(1).replace(",", ""))
         signal["entry_high"] = float(entry_match.group(2).replace(",", ""))
         signal["entry_mid"] = (signal["entry_low"] + signal["entry_high"]) / 2
-    tp_matches = re.findall(r"^\s*\d+\.\s*([\d,\.]+)", text, re.MULTILINE)
+
+    # Take Profits
+    tp_matches = re.findall(r"^\s*\d+[\.\)]\s*([\d,\.]+)", text, re.MULTILINE)
     if tp_matches:
         signal["tps"] = [float(tp.replace(",", "")) for tp in tp_matches]
+
     return signal
 
 def calculate_lots(capital, risk_percent, signal):
@@ -361,14 +399,11 @@ def calculate_lots(capital, risk_percent, signal):
     entry = signal["entry_mid"]
     sl = signal["sl"]
     sl_distance = abs(entry - sl)
+    if sl_distance == 0:
+        return None
 
-    # Risque total en euros
     risque_total = capital * (risk_percent / 100)
-
-    # Valeur du pip : pour BTC/USD 1 lot = 1 BTC
-    # 1 pip = 1 point de prix, valeur pip = 1$ par lot
-    # Lot = risque_total / sl_distance
-    lot_total = risque_total / sl_distance if sl_distance > 0 else 0.01
+    lot_total = risque_total / sl_distance
     lot_total = max(0.01, round(lot_total / 0.01) * 0.01)
 
     tps = signal["tps"]
@@ -613,7 +648,7 @@ def send_risk_keyboard(user_id):
     keyboard.add(*[telebot.types.KeyboardButton(r) for r in RISK_OPTIONS])
     bot.send_message(
         user_id,
-        "📊 *Quel % de risque par trade ?*\n\n_Ce % de votre capital sera risqué sur chaque signal._\n\n• 1% = conservateur\n• 2.5% = modéré\n• 5% = agressif\n• 10% = très agressif",
+        "📊 *Quel % de risque par trade ?*\n\n• 1% = conservateur\n• 2.5% = modéré\n• 5% = agressif\n• 10% = très agressif",
         parse_mode="Markdown",
         reply_markup=keyboard
     )
@@ -727,13 +762,14 @@ def show_profil(message):
     capital = user.get("capital")
     risk = user.get("risk_percent") or 1.0
     capital_str = str(capital) + "€" if capital else "Non renseigné"
+    risque_euros = round(capital * risk / 100, 2) if capital else 0
     premium = "✅ Premium" if user.get("is_premium") else "❌ Gratuit"
     msg = "👤 *Votre profil :*\n\n"
     msg += "🏦 Broker : *" + broker + "*\n"
     msg += "💰 Capital : *" + capital_str + "*\n"
-    msg += "📊 Risque par trade : *" + str(risk) + "%*\n"
+    msg += "📊 Risque : *" + str(risk) + "%* (" + str(risque_euros) + "€ par trade)\n"
     msg += "⭐ Statut : *" + premium + "*\n\n"
-    msg += "_Pour modifier : /broker, /capital ou /risque_"
+    msg += "_Modifier : /broker, /capital ou /risque_"
     bot.reply_to(message, msg, parse_mode="Markdown")
 
 @bot.message_handler(commands=["broker"])
