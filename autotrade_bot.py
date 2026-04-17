@@ -7,6 +7,8 @@ import time
 import stripe
 import psycopg2
 import re
+from datetime import datetime
+import pytz
 from flask import Flask, request, jsonify
 from threading import Thread
 from collections import defaultdict
@@ -19,9 +21,11 @@ STRIPE_PRICE_MENSUEL = os.environ.get("STRIPE_PRICE_MENSUEL")
 STRIPE_PRICE_TRIMESTRIEL = os.environ.get("STRIPE_PRICE_TRIMESTRIEL")
 STRIPE_PRICE_ANNUEL = os.environ.get("STRIPE_PRICE_ANNUEL")
 DATABASE_URL = os.environ.get("DATABASE_URL")
+NEWS_API_KEY = os.environ.get("NEWS_API_KEY")
 ALPHA_VANTAGE_KEY = "2O26IQTEBFWYLALV"
 ADMIN_ID = 7244221695
 CANAL_ID = -1003587224431
+TIMEZONE = pytz.timezone("Europe/Paris")
 
 stripe.api_key = STRIPE_SECRET_KEY
 
@@ -30,7 +34,7 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 app = Flask(__name__)
 
 MAX_FREE_QUESTIONS = 5
-MAX_HISTORY = 20  # 10 échanges complets
+MAX_HISTORY = 20
 
 PRICE_ONLY_KEYWORDS = [
     "cours", "prix", "price", "combien", "coute", "vaut", "valeur",
@@ -230,19 +234,14 @@ def check_and_send_alerts(user_id, capital_actuel):
         user = get_user(user_id)
         if not user:
             return
-
         capital_initial = user.get("capital_initial") or capital_actuel
         broker = user.get("broker", "?")
         alerte_danger = user.get("alerte_danger_envoyee", False)
         alerte_profit = user.get("alerte_profit_envoyee", False)
-
         if capital_initial <= 0:
             return
-
         variation = ((capital_actuel - capital_initial) / capital_initial) * 100
-        perte = capital_initial - capital_actuel
 
-        # Alerte danger : capital < 250$ OU perte > 50%
         if not alerte_danger and (capital_actuel < 250 or variation <= -50):
             msg = "🔴 *ALERTE DANGER — Client en difficulté*\n\n"
             msg += "👤 ID : " + str(user_id) + "\n"
@@ -255,7 +254,6 @@ def check_and_send_alerts(user_id, capital_actuel):
             else:
                 msg += "⚠️ Perte > 50% — intervention recommandée"
             bot.send_message(ADMIN_ID, msg, parse_mode="Markdown")
-            # Marque l'alerte comme envoyée
             conn = get_db()
             cur = conn.cursor()
             cur.execute("UPDATE users SET alerte_danger_envoyee = TRUE WHERE telegram_id = %s", (user_id,))
@@ -263,7 +261,6 @@ def check_and_send_alerts(user_id, capital_actuel):
             cur.close()
             conn.close()
 
-        # Alerte profit : gain > 100%
         if not alerte_profit and variation >= 100:
             msg = "🟢 *ALERTE PERFORMANCE — Client en forte progression*\n\n"
             msg += "👤 ID : " + str(user_id) + "\n"
@@ -279,7 +276,6 @@ def check_and_send_alerts(user_id, capital_actuel):
             conn.commit()
             cur.close()
             conn.close()
-
     except Exception as e:
         print("Erreur alerte : " + str(e))
 
@@ -430,6 +426,132 @@ def delete_pending_signal(user_id):
         conn.close()
     except:
         pass
+
+def get_macro_news():
+    """Récupère les news macro importantes du jour"""
+    try:
+        keywords = "Fed OR FOMC OR BCE OR Trump OR inflation OR interest rate OR crypto OR bitcoin OR gold OR dollar"
+        url = "https://newsapi.org/v2/everything?q=" + requests.utils.quote(keywords) + "&language=fr&sortBy=publishedAt&pageSize=5&apiKey=" + NEWS_API_KEY
+        r = requests.get(url, timeout=5)
+        data = r.json()
+        articles = data.get("articles", [])
+        if not articles:
+            # Fallback en anglais
+            url = "https://newsapi.org/v2/everything?q=" + requests.utils.quote(keywords) + "&language=en&sortBy=publishedAt&pageSize=5&apiKey=" + NEWS_API_KEY
+            r = requests.get(url, timeout=5)
+            data = r.json()
+            articles = data.get("articles", [])
+        return articles[:5]
+    except:
+        return []
+
+def get_morning_briefing():
+    """Génère le morning briefing complet"""
+    now = datetime.now(TIMEZONE)
+    date_str = now.strftime("%A %d %B %Y").capitalize()
+
+    msg = "🌅 *Morning Briefing — " + date_str + "*\n"
+    msg += "━━━━━━━━━━━━━━━━━━━━\n\n"
+
+    # Prix en temps réel
+    msg += "📊 *Marchés en temps réel :*\n"
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true"
+        r = requests.get(url, timeout=5)
+        data = r.json()
+        btc = data["bitcoin"]["usd"]
+        btc_change = data["bitcoin"]["usd_24h_change"]
+        eth = data["ethereum"]["usd"]
+        eth_change = data["ethereum"]["usd_24h_change"]
+        btc_emoji = "🟢" if btc_change >= 0 else "🔴"
+        eth_emoji = "🟢" if eth_change >= 0 else "🔴"
+        msg += btc_emoji + " BTC : $" + "{:,.0f}".format(btc) + " (" + "{:+.1f}".format(btc_change) + "%)\n"
+        msg += eth_emoji + " ETH : $" + "{:,.0f}".format(eth) + " (" + "{:+.1f}".format(eth_change) + "%)\n"
+    except:
+        pass
+
+    try:
+        url = "https://api.gold-api.com/price/XAU"
+        r = requests.get(url, timeout=5)
+        data = r.json()
+        gold = data["price"]
+        msg += "🥇 OR : $" + "{:,.0f}".format(gold) + "/oz\n"
+    except:
+        pass
+
+    try:
+        url = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/EUR/USD"
+        r = requests.get(url, timeout=5)
+        data = r.json()
+        eurusd = (data[0]["spreadProfilePrices"][0]["ask"] + data[0]["spreadProfilePrices"][0]["bid"]) / 2
+        msg += "💱 EUR/USD : " + "{:.4f}".format(eurusd) + "\n"
+    except:
+        pass
+
+    msg += "\n"
+
+    # News macro
+    articles = get_macro_news()
+    if articles:
+        msg += "📰 *News à surveiller :*\n\n"
+        for i, article in enumerate(articles[:4]):
+            title = article.get("title", "").split(" - ")[0][:80]
+            msg += "• " + title + "\n"
+        msg += "\n"
+
+    # Analyse IA des news
+    if articles:
+        try:
+            news_text = "\n".join([a.get("title", "") for a in articles[:4]])
+            response = client.messages.create(
+                model="claude-opus-4-5",
+                max_tokens=200,
+                system="Tu es un expert en trading. En 2-3 phrases maximum, dis quel impact ces news peuvent avoir sur BTC, Gold et EUR/USD aujourd'hui. Sois direct et concis. Reponds en francais.",
+                messages=[{"role": "user", "content": "News du jour :\n" + news_text + "\n\nQuel impact sur les marchés ?"}]
+            )
+            analyse = response.content[0].text
+            msg += "🤖 *Analyse IA :*\n" + analyse + "\n\n"
+        except:
+            pass
+
+    msg += "━━━━━━━━━━━━━━━━━━━━\n"
+    msg += "_Bonne journée et bon trading ! 📈_"
+    return msg
+
+def send_morning_briefing_to_all():
+    """Envoie le morning briefing à tous les abonnés premium"""
+    try:
+        briefing = get_morning_briefing()
+        members = get_all_premium()
+        sent = 0
+        for member in members:
+            try:
+                bot.send_message(member[0], briefing, parse_mode="Markdown")
+                sent += 1
+                time.sleep(0.1)
+            except:
+                pass
+        print("Morning briefing envoyé à " + str(sent) + " abonnés")
+    except Exception as e:
+        print("Erreur morning briefing : " + str(e))
+
+def morning_briefing_scheduler():
+    """Thread qui vérifie l'heure et envoie le briefing à 8h30"""
+    already_sent_today = False
+    while True:
+        try:
+            now = datetime.now(TIMEZONE)
+            if now.hour == 8 and now.minute == 30 and not already_sent_today:
+                send_morning_briefing_to_all()
+                already_sent_today = True
+            elif now.hour == 8 and now.minute == 31:
+                already_sent_today = False
+            elif now.hour != 8:
+                already_sent_today = False
+            time.sleep(30)
+        except Exception as e:
+            print("Erreur scheduler : " + str(e))
+            time.sleep(30)
 
 def is_trading_signal(text):
     text_upper = text.upper()
@@ -685,11 +807,11 @@ def get_blocked_message(user_id):
     msg = "🚫 *Vous avez utilisé vos 5 questions gratuites.*\n\n"
     msg += "Pour continuer, choisissez votre abonnement :\n\n"
     if mensuel_url:
-        msg += "📅 [Mensuel — 24,99€/mois](" + mensuel_url + ")\n"
+        msg += "📅 [Mensuel — 29,99€/mois](" + mensuel_url + ")\n"
     if trimestriel_url:
-        msg += "📆 [Trimestriel — 69,99€/3 mois](" + trimestriel_url + ")\n"
+        msg += "📆 [Trimestriel — 74,99€/3 mois](" + trimestriel_url + ")\n"
     if annuel_url:
-        msg += "🗓️ [Annuel — 199,99€/an](" + annuel_url + ")\n"
+        msg += "🗓️ [Annuel — 239,99€/an](" + annuel_url + ")\n"
     msg += "\n✅ Paiement sécurisé par Stripe"
     return msg
 
@@ -735,7 +857,7 @@ def stripe_webhook():
         if user_id:
             set_premium(int(user_id), True, plan, customer_id, subscription_id)
             try:
-                bot.send_message(int(user_id), "🎉 *Paiement confirmé !*\n\nBienvenue dans AutoTrade Premium !\nVous avez maintenant un accès illimité. 🚀", parse_mode="Markdown")
+                bot.send_message(int(user_id), "🎉 *Paiement confirmé !*\n\nBienvenue dans AutoTrade Premium !\nVous avez maintenant un accès illimité. 🚀\n\n_Chaque matin à 8h30, vous recevrez votre briefing des marchés._", parse_mode="Markdown")
             except:
                 pass
 
@@ -780,7 +902,6 @@ def handle_channel_post(message):
         user = get_user(user_id)
         save_pending_signal(user_id, message.text)
         try:
-            # Toujours demander le capital actuel
             capital_info = ""
             if user and user.get("capital"):
                 capital_info = "\n_Dernier capital enregistré : " + str(user["capital"]) + "€_"
@@ -805,6 +926,7 @@ Je suis votre assistant trading personnel, disponible 24h/24 et 7j/7.
 
 ✅ Prix en temps réel — Crypto, Forex, Or, Indices
 ✅ Signaux automatiques avec calcul de lots
+✅ Morning briefing à 8h30 tous les matins
 ✅ Analyse de vos graphiques TradingView
 ✅ Niveaux clés — Support, Résistance, Objectifs
 ✅ Gestion du risque personnalisée
@@ -812,6 +934,16 @@ Je suis votre assistant trading personnel, disponible 24h/24 et 7j/7.
 _Avant de commencer, j'ai besoin de 3 informations rapides_ 👇""", parse_mode="Markdown")
     time.sleep(1)
     send_broker_keyboard(user_id)
+
+@bot.message_handler(commands=["morning"])
+def send_morning_command(message):
+    user_id = message.from_user.id
+    if not is_premium(user_id):
+        bot.reply_to(message, "⭐ Cette fonctionnalité est réservée aux membres Premium.\n\nAbonnez-vous avec /abonnement 🚀")
+        return
+    bot.reply_to(message, "⏳ Génération du briefing en cours...")
+    briefing = get_morning_briefing()
+    bot.send_message(user_id, briefing, parse_mode="Markdown")
 
 @bot.message_handler(commands=["profil"])
 def show_profil(message):
@@ -828,12 +960,10 @@ def show_profil(message):
     capital_initial_str = str(capital_initial) + "€" if capital_initial else "Non renseigné"
     risque_euros = round(capital * risk / 100, 2) if capital else 0
     premium = "✅ Premium" if user.get("is_premium") else "❌ Gratuit"
-
     variation_str = ""
     if capital and capital_initial and capital_initial > 0:
         variation = ((capital - capital_initial) / capital_initial) * 100
         variation_str = "\n📊 Performance : *" + "{:+.1f}".format(variation) + "%*"
-
     msg = "👤 *Votre profil :*\n\n"
     msg += "🏦 Broker : *" + broker + "*\n"
     msg += "💰 Capital initial : *" + capital_initial_str + "*\n"
@@ -842,6 +972,26 @@ def show_profil(message):
     msg += "📊 Risque : *" + str(risk) + "%* (" + str(risque_euros) + "€ par trade)\n"
     msg += "⭐ Statut : *" + premium + "*\n\n"
     msg += "_Modifier : /broker, /capital ou /risque_"
+    bot.reply_to(message, msg, parse_mode="Markdown")
+
+@bot.message_handler(commands=["aide"])
+def send_aide(message):
+    msg = """📖 *Commandes disponibles :*
+
+💹 *Trading*
+/morning — Briefing des marchés du jour
+/profil — Voir votre profil et performance
+
+⚙️ *Paramètres*
+/broker — Changer de broker
+/capital — Mettre à jour votre capital
+/risque — Modifier votre % de risque
+/nouveau — Nouvelle conversation
+
+💳 *Abonnement*
+/abonnement — Voir les offres Premium
+
+_Vous pouvez aussi poser vos questions directement en texte ou envoyer un screenshot de graphique !_"""
     bot.reply_to(message, msg, parse_mode="Markdown")
 
 @bot.message_handler(commands=["broker"])
@@ -886,7 +1036,7 @@ def activate_premium(message):
         set_premium(target_id, True, "test")
         bot.reply_to(message, "✅ Utilisateur " + str(target_id) + " activé en Premium !")
         try:
-            bot.send_message(target_id, "🎉 *Accès Premium activé !*\n\nVous avez maintenant un accès illimité à AutoTrade Bot. 🚀", parse_mode="Markdown")
+            bot.send_message(target_id, "🎉 *Accès Premium activé !*\n\nVous avez maintenant un accès illimité à AutoTrade Bot.\n\n_Chaque matin à 8h30, vous recevrez votre briefing des marchés._\n\nTapez /aide pour voir toutes les commandes ! 🚀", parse_mode="Markdown")
         except:
             pass
     else:
@@ -936,35 +1086,39 @@ def list_members(message):
         msg += "• " + str(m[0]) + " — " + broker + " — " + capital + perf + " — " + risk + "\n"
     bot.reply_to(message, msg, parse_mode="Markdown")
 
+@bot.message_handler(commands=["briefing"])
+def force_briefing_admin(message):
+    """Commande admin pour forcer l'envoi du briefing à tous"""
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "⛔ Commande réservée à l'administrateur.")
+        return
+    bot.reply_to(message, "📤 Envoi du briefing à tous les abonnés...")
+    send_morning_briefing_to_all()
+    bot.send_message(ADMIN_ID, "✅ Briefing envoyé !")
+
 @bot.message_handler(content_types=["photo"])
 def handle_photo(message):
     user_id = message.from_user.id
     count = get_question_count(user_id)
-
     if not is_premium(user_id) and count >= MAX_FREE_QUESTIONS:
         msg = get_blocked_message(user_id)
         bot.reply_to(message, msg, parse_mode="Markdown", disable_web_page_preview=True)
         return
-
     if not is_premium(user_id):
         increment_question(user_id)
         count += 1
-
     remaining = MAX_FREE_QUESTIONS - count
     bot.reply_to(message, "🔍 Analyse du graphique en cours...")
-
     try:
         file_id = message.photo[-1].file_id
         image_base64 = download_image_as_base64(file_id)
         if not image_base64:
             bot.reply_to(message, "Impossible de lire l'image.")
             return
-
         live_prices = get_live_prices_context()
         prices_context = "PRIX EN TEMPS REEL ACTUELS :\n"
         for symbol, price in live_prices.items():
             prices_context += "- " + symbol + ": $" + "{:,.2f}".format(price) + "\n"
-
         user = get_user(user_id)
         user_context = ""
         if user and user.get("broker"):
@@ -973,10 +1127,8 @@ def handle_photo(message):
             user_context += "Capital : " + str(user["capital"]) + "€\n"
         if user and user.get("risk_percent"):
             user_context += "Risque par trade : " + str(user["risk_percent"]) + "%\n"
-
         caption = message.caption or "Analyse ce screenshot de trading. Sois concis et direct. Donne les infos cles : actif, direction, niveaux importants. Si capital mentionne, calcule le lot (min 0.01). IMPORTANT: Les chiffres de vues/likes/reactions ne sont pas des prix ni des dates."
         full_prompt = prices_context + "\n" + user_context + "\n" + caption
-
         history = get_history(user_id)
         messages_with_history = history + [
             {"role": "user", "content": [
@@ -984,24 +1136,20 @@ def handle_photo(message):
                 {"type": "text", "text": full_prompt}
             ]}
         ]
-
         response = client.messages.create(
             model="claude-opus-4-5",
             max_tokens=600,
             system="Tu es un expert en trading concis. Reponds UNIQUEMENT a ce qui est demande. Utilise TOUJOURS les prix en temps reel fournis. Pour les calculs de lots, minimum 0.01 lot. Tiens compte du broker, capital et % risque si fournis. Les chiffres de vues/likes ne sont pas des prix ni des dates. Reponds en francais. Tu te souviens du contexte des echanges precedents.",
             messages=messages_with_history,
         )
-
         answer = response.content[0].text
         save_message(user_id, "user", "[Screenshot] " + caption)
         save_message(user_id, "assistant", answer)
-
         if is_premium(user_id):
             footer = "\n\n_✨ Membre Premium_"
         else:
             footer = "\n\n_" + str(remaining) + " question(s) gratuite(s) restante(s)_"
         bot.reply_to(message, answer + footer, parse_mode="Markdown")
-
     except Exception as e:
         bot.reply_to(message, "Erreur : " + str(e))
 
@@ -1011,7 +1159,6 @@ def handle_message(message):
     user = get_user(user_id)
     onboarding_step = user.get("onboarding_step", 0) if user else 0
 
-    # Étape 1 : broker
     if onboarding_step == 1:
         broker = message.text.strip()
         if broker not in BROKERS:
@@ -1023,7 +1170,6 @@ def handle_message(message):
         bot.send_message(user_id, "✅ Broker : *" + broker + "*\n\n💰 *Quel est votre capital de trading ?*\n_(ex: 2000 pour 2000€)_", parse_mode="Markdown", reply_markup=keyboard)
         return
 
-    # Étape 2 : capital initial
     if onboarding_step == 2:
         try:
             capital = float(message.text.strip().replace("€", "").replace(",", ".").replace(" ", ""))
@@ -1037,7 +1183,6 @@ def handle_message(message):
             bot.send_message(user_id, "⚠️ Veuillez entrer un montant valide (ex: 2000)")
         return
 
-    # Étape 3 : risque
     if onboarding_step == 3:
         text = message.text.strip()
         if text == "Personnalisé":
@@ -1058,7 +1203,7 @@ def handle_message(message):
             keyboard = telebot.types.ReplyKeyboardRemove()
             bot.send_message(
                 user_id,
-                "✅ *Profil configuré !*\n\n🏦 Broker : *" + broker + "*\n💰 Capital : *" + str(capital) + "€*\n📊 Risque : *" + str(risk) + "%* (" + str(risque_euros) + "€ par trade)\n\n_Modifier : /broker, /capital ou /risque_\n\n🎁 Vous avez *5 questions gratuites*.\nPostez votre question ou screenshot ! 📈",
+                "✅ *Profil configuré !*\n\n🏦 Broker : *" + broker + "*\n💰 Capital : *" + str(capital) + "€*\n📊 Risque : *" + str(risk) + "%* (" + str(risque_euros) + "€ par trade)\n\n_Modifier : /broker, /capital ou /risque_\n\n📖 Tapez /aide pour voir toutes les commandes\n🎁 Vous avez *5 questions gratuites* — Postez votre question ou screenshot ! 📈",
                 parse_mode="Markdown",
                 reply_markup=keyboard
             )
@@ -1066,7 +1211,6 @@ def handle_message(message):
             send_risk_keyboard(user_id)
         return
 
-    # Étape 4 : risque personnalisé
     if onboarding_step == 4:
         try:
             risk = float(message.text.strip().replace("%", "").replace(",", "."))
@@ -1080,52 +1224,49 @@ def handle_message(message):
             risque_euros = round(capital * risk / 100, 2)
             bot.send_message(
                 user_id,
-                "✅ *Profil configuré !*\n\n🏦 Broker : *" + broker + "*\n💰 Capital : *" + str(capital) + "€*\n📊 Risque : *" + str(risk) + "%* (" + str(risque_euros) + "€ par trade)\n\n_Modifier : /broker, /capital ou /risque_\n\n🎁 Vous avez *5 questions gratuites*.\nPostez votre question ou screenshot ! 📈",
+                "✅ *Profil configuré !*\n\n🏦 Broker : *" + broker + "*\n💰 Capital : *" + str(capital) + "€*\n📊 Risque : *" + str(risk) + "%* (" + str(risque_euros) + "€ par trade)\n\n_Modifier : /broker, /capital ou /risque_\n\n📖 Tapez /aide pour voir toutes les commandes\n🎁 Vous avez *5 questions gratuites* — Postez votre question ou screenshot ! 📈",
                 parse_mode="Markdown"
             )
         except:
             bot.send_message(user_id, "⚠️ Entrez un nombre valide (ex: 3)")
         return
 
-    # Signal en attente — demande capital actuel
+    # Signal en attente — extraction intelligente du capital
     pending = get_pending_signal(user_id)
     if pending:
         try:
-            capital_input = float(message.text.strip().replace("€", "").replace(",", "."))
-            if capital_input > 0:
-                # Met à jour le capital actuel
-                set_capital(user_id, capital_input, is_initial=False)
-
-                # Vérifie les alertes
-                check_and_send_alerts(user_id, capital_input)
-
-                signal = parse_signal(pending)
-                risk = user.get("risk_percent", 1.0) if user else 1.0
-                broker = user.get("broker", "") if user else ""
-                lots = calculate_lots(capital_input, risk, signal)
-                if lots:
-                    result = format_signal_with_lots(signal, lots, capital_input, risk, broker)
+            text_clean = message.text.strip().lower()
+            # Extraction du nombre même dans une phrase
+            numbers = re.findall(r'\d+(?:[.,]\d+)?', text_clean)
+            if numbers:
+                capital_input = float(numbers[0].replace(",", "."))
+                if capital_input > 0:
+                    set_capital(user_id, capital_input, is_initial=False)
+                    check_and_send_alerts(user_id, capital_input)
+                    signal = parse_signal(pending)
+                    risk = user.get("risk_percent", 1.0) if user else 1.0
+                    broker = user.get("broker", "") if user else ""
+                    lots = calculate_lots(capital_input, risk, signal)
                     delete_pending_signal(user_id)
-                    bot.reply_to(message, result, parse_mode="Markdown")
+                    if lots:
+                        result = format_signal_with_lots(signal, lots, capital_input, risk, broker)
+                        bot.reply_to(message, result, parse_mode="Markdown")
+                    else:
+                        bot.reply_to(message, "⚠️ Impossible de calculer les lots pour ce signal.")
                     return
-                else:
-                    delete_pending_signal(user_id)
-                    bot.reply_to(message, "⚠️ Impossible de calculer les lots pour ce signal.")
-                    return
-        except ValueError:
+            else:
+                delete_pending_signal(user_id)
+        except:
             delete_pending_signal(user_id)
 
     count = get_question_count(user_id)
-
     if not is_premium(user_id) and count >= MAX_FREE_QUESTIONS:
         msg = get_blocked_message(user_id)
         bot.reply_to(message, msg, parse_mode="Markdown", disable_web_page_preview=True)
         return
-
     if not is_premium(user_id):
         increment_question(user_id)
         count += 1
-
     remaining = MAX_FREE_QUESTIONS - count
 
     price_info = ""
@@ -1205,6 +1346,11 @@ def run_bot():
 
 if __name__ == "__main__":
     init_db()
+    # Thread morning briefing
+    scheduler_thread = Thread(target=morning_briefing_scheduler)
+    scheduler_thread.daemon = True
+    scheduler_thread.start()
+    # Thread Flask
     flask_thread = Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
