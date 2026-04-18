@@ -157,6 +157,30 @@ def get_user(user_id):
     except:
         return None
 
+def get_all_premium():
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT telegram_id, plan FROM users WHERE is_premium = TRUE")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return rows
+    except:
+        return []
+
+def get_all_users():
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT telegram_id, is_premium FROM users WHERE onboarding_step = 0")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return rows
+    except:
+        return []
+
 def set_onboarding_step(user_id, step):
     try:
         conn = get_db()
@@ -335,18 +359,6 @@ def set_premium(user_id, status=True, plan=None, stripe_customer_id=None, subscr
     except:
         pass
 
-def get_all_premium():
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("SELECT telegram_id, plan FROM users WHERE is_premium = TRUE")
-        rows = cur.fetchall()
-        cur.close()
-        conn.close()
-        return rows
-    except:
-        return []
-
 def save_message(user_id, role, content):
     try:
         conn = get_db()
@@ -428,7 +440,6 @@ def delete_pending_signal(user_id):
         pass
 
 def get_macro_news():
-    """Récupère les news macro importantes du jour"""
     try:
         keywords = "Fed OR FOMC OR BCE OR Trump OR inflation OR interest rate OR crypto OR bitcoin OR gold OR dollar"
         url = "https://newsapi.org/v2/everything?q=" + requests.utils.quote(keywords) + "&language=fr&sortBy=publishedAt&pageSize=5&apiKey=" + NEWS_API_KEY
@@ -436,7 +447,6 @@ def get_macro_news():
         data = r.json()
         articles = data.get("articles", [])
         if not articles:
-            # Fallback en anglais
             url = "https://newsapi.org/v2/everything?q=" + requests.utils.quote(keywords) + "&language=en&sortBy=publishedAt&pageSize=5&apiKey=" + NEWS_API_KEY
             r = requests.get(url, timeout=5)
             data = r.json()
@@ -446,14 +456,11 @@ def get_macro_news():
         return []
 
 def get_morning_briefing():
-    """Génère le morning briefing complet"""
     now = datetime.now(TIMEZONE)
     date_str = now.strftime("%A %d %B %Y").capitalize()
-
     msg = "🌅 *Morning Briefing — " + date_str + "*\n"
     msg += "━━━━━━━━━━━━━━━━━━━━\n\n"
 
-    # Prix en temps réel
     msg += "📊 *Marchés en temps réel :*\n"
     try:
         url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true"
@@ -469,7 +476,6 @@ def get_morning_briefing():
         msg += eth_emoji + " ETH : $" + "{:,.0f}".format(eth) + " (" + "{:+.1f}".format(eth_change) + "%)\n"
     except:
         pass
-
     try:
         url = "https://api.gold-api.com/price/XAU"
         r = requests.get(url, timeout=5)
@@ -478,7 +484,6 @@ def get_morning_briefing():
         msg += "🥇 OR : $" + "{:,.0f}".format(gold) + "/oz\n"
     except:
         pass
-
     try:
         url = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/EUR/USD"
         r = requests.get(url, timeout=5)
@@ -489,17 +494,14 @@ def get_morning_briefing():
         pass
 
     msg += "\n"
-
-    # News macro
     articles = get_macro_news()
     if articles:
         msg += "📰 *News à surveiller :*\n\n"
-        for i, article in enumerate(articles[:4]):
+        for article in articles[:4]:
             title = article.get("title", "").split(" - ")[0][:80]
             msg += "• " + title + "\n"
         msg += "\n"
 
-    # Analyse IA des news
     if articles:
         try:
             news_text = "\n".join([a.get("title", "") for a in articles[:4]])
@@ -519,7 +521,6 @@ def get_morning_briefing():
     return msg
 
 def send_morning_briefing_to_all():
-    """Envoie le morning briefing à tous les abonnés premium"""
     try:
         briefing = get_morning_briefing()
         members = get_all_premium()
@@ -536,7 +537,6 @@ def send_morning_briefing_to_all():
         print("Erreur morning briefing : " + str(e))
 
 def morning_briefing_scheduler():
-    """Thread qui vérifie l'heure et envoie le briefing à 8h30"""
     already_sent_today = False
     while True:
         try:
@@ -857,7 +857,7 @@ def stripe_webhook():
         if user_id:
             set_premium(int(user_id), True, plan, customer_id, subscription_id)
             try:
-                bot.send_message(int(user_id), "🎉 *Paiement confirmé !*\n\nBienvenue dans AutoTrade Premium !\nVous avez maintenant un accès illimité. 🚀\n\n_Chaque matin à 8h30, vous recevrez votre briefing des marchés._", parse_mode="Markdown")
+                bot.send_message(int(user_id), "🎉 *Paiement confirmé !*\n\nBienvenue dans AutoTrade Premium !\nVous avez maintenant un accès illimité. 🚀\n\n🌅 Chaque matin à 8h30, vous recevrez votre briefing des marchés.\n\n📖 Tapez /aide pour voir toutes les commandes !", parse_mode="Markdown")
             except:
                 pass
 
@@ -979,7 +979,7 @@ def send_aide(message):
     msg = """📖 *Commandes disponibles :*
 
 💹 *Trading*
-/morning — Briefing des marchés du jour
+/morning — Briefing des marchés du jour ⭐
 /profil — Voir votre profil et performance
 
 ⚙️ *Paramètres*
@@ -991,7 +991,7 @@ def send_aide(message):
 💳 *Abonnement*
 /abonnement — Voir les offres Premium
 
-_Vous pouvez aussi poser vos questions directement en texte ou envoyer un screenshot de graphique !_"""
+_Posez vos questions en texte ou envoyez un screenshot de graphique !_"""
     bot.reply_to(message, msg, parse_mode="Markdown")
 
 @bot.message_handler(commands=["broker"])
@@ -1036,7 +1036,7 @@ def activate_premium(message):
         set_premium(target_id, True, "test")
         bot.reply_to(message, "✅ Utilisateur " + str(target_id) + " activé en Premium !")
         try:
-            bot.send_message(target_id, "🎉 *Accès Premium activé !*\n\nVous avez maintenant un accès illimité à AutoTrade Bot.\n\n_Chaque matin à 8h30, vous recevrez votre briefing des marchés._\n\nTapez /aide pour voir toutes les commandes ! 🚀", parse_mode="Markdown")
+            bot.send_message(target_id, "🎉 *Accès Premium activé !*\n\nVous avez maintenant un accès illimité à AutoTrade Bot.\n\n🌅 Chaque matin à 8h30, vous recevrez votre briefing des marchés.\n\n📖 Tapez /aide pour voir toutes les commandes ! 🚀", parse_mode="Markdown")
         except:
             pass
     else:
@@ -1086,13 +1086,90 @@ def list_members(message):
         msg += "• " + str(m[0]) + " — " + broker + " — " + capital + perf + " — " + risk + "\n"
     bot.reply_to(message, msg, parse_mode="Markdown")
 
-@bot.message_handler(commands=["briefing"])
-def force_briefing_admin(message):
-    """Commande admin pour forcer l'envoi du briefing à tous"""
+@bot.message_handler(commands=["stats"])
+def show_stats(message):
     if message.from_user.id != ADMIN_ID:
         bot.reply_to(message, "⛔ Commande réservée à l'administrateur.")
         return
-    bot.reply_to(message, "📤 Envoi du briefing à tous les abonnés...")
+    try:
+        all_users = get_all_users()
+        premium = get_all_premium()
+        total = len(all_users)
+        total_premium = len(premium)
+        total_free = total - total_premium
+        msg = "📊 *Statistiques AutoTrade Bot :*\n\n"
+        msg += "👥 Total utilisateurs : *" + str(total) + "*\n"
+        msg += "⭐ Premium : *" + str(total_premium) + "*\n"
+        msg += "🆓 Gratuits : *" + str(total_free) + "*\n"
+        if total > 0:
+            taux = round(total_premium / total * 100, 1)
+            msg += "📈 Taux de conversion : *" + str(taux) + "%*\n"
+        bot.reply_to(message, msg, parse_mode="Markdown")
+    except Exception as e:
+        bot.reply_to(message, "Erreur : " + str(e))
+
+@bot.message_handler(commands=["broadcast"])
+def broadcast_message(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "⛔ Commande réservée à l'administrateur.")
+        return
+    text = message.text.replace("/broadcast", "").strip()
+    if not text:
+        bot.reply_to(message, "Usage : /broadcast Votre message\n\nExemple :\n/broadcast 🎯 Zoom ce soir 20h ! Lien : https://zoom.us/xxx\n\n_Envoi aux membres Premium uniquement._")
+        return
+    members = get_all_premium()
+    if not members:
+        bot.reply_to(message, "Aucun membre Premium pour le moment.")
+        return
+    sent = 0
+    failed = 0
+    for member in members:
+        try:
+            bot.send_message(member[0], "📢 *Message de votre coach :*\n\n" + text, parse_mode="Markdown")
+            sent += 1
+            time.sleep(0.1)
+        except:
+            failed += 1
+    bot.reply_to(message, "✅ Envoyé à *" + str(sent) + "* membres Premium\n❌ Échec : " + str(failed), parse_mode="Markdown")
+
+@bot.message_handler(commands=["upsell"])
+def upsell_message(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "⛔ Commande réservée à l'administrateur.")
+        return
+    text = message.text.replace("/upsell", "").strip()
+    if not text:
+        bot.reply_to(message, "Usage : /upsell Votre message\n\nExemple :\n/upsell 🚀 Accédez aux signaux en temps réel et au morning briefing ! Abonnez-vous : /abonnement\n\n_Envoi à TOUS les utilisateurs (gratuits + Premium)._")
+        return
+    users = get_all_users()
+    if not users:
+        bot.reply_to(message, "Aucun utilisateur pour le moment.")
+        return
+    sent_free = 0
+    sent_premium = 0
+    failed = 0
+    for user in users:
+        try:
+            bot.send_message(user[0], "💡 *Message de votre coach :*\n\n" + text, parse_mode="Markdown")
+            if user[1]:
+                sent_premium += 1
+            else:
+                sent_free += 1
+            time.sleep(0.1)
+        except:
+            failed += 1
+    bot.reply_to(
+        message,
+        "✅ Envoyé à *" + str(sent_free + sent_premium) + "* utilisateurs\n📊 Gratuits : *" + str(sent_free) + "* | Premium : *" + str(sent_premium) + "*\n❌ Échec : " + str(failed),
+        parse_mode="Markdown"
+    )
+
+@bot.message_handler(commands=["briefing"])
+def force_briefing_admin(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "⛔ Commande réservée à l'administrateur.")
+        return
+    bot.reply_to(message, "📤 Envoi du briefing à tous les abonnés Premium...")
     send_morning_briefing_to_all()
     bot.send_message(ADMIN_ID, "✅ Briefing envoyé !")
 
@@ -1235,9 +1312,7 @@ def handle_message(message):
     pending = get_pending_signal(user_id)
     if pending:
         try:
-            text_clean = message.text.strip().lower()
-            # Extraction du nombre même dans une phrase
-            numbers = re.findall(r'\d+(?:[.,]\d+)?', text_clean)
+            numbers = re.findall(r'\d+(?:[.,]\d+)?', message.text.strip())
             if numbers:
                 capital_input = float(numbers[0].replace(",", "."))
                 if capital_input > 0:
@@ -1346,11 +1421,9 @@ def run_bot():
 
 if __name__ == "__main__":
     init_db()
-    # Thread morning briefing
     scheduler_thread = Thread(target=morning_briefing_scheduler)
     scheduler_thread.daemon = True
     scheduler_thread.start()
-    # Thread Flask
     flask_thread = Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
