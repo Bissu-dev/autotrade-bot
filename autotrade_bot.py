@@ -11,7 +11,6 @@ from datetime import datetime
 import pytz
 from flask import Flask, request, jsonify
 from threading import Thread
-from collections import defaultdict
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
@@ -460,7 +459,6 @@ def get_morning_briefing():
     date_str = now.strftime("%A %d %B %Y").capitalize()
     msg = "🌅 *Morning Briefing — " + date_str + "*\n"
     msg += "━━━━━━━━━━━━━━━━━━━━\n\n"
-
     msg += "📊 *Marchés en temps réel :*\n"
     try:
         url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true"
@@ -492,7 +490,6 @@ def get_morning_briefing():
         msg += "💱 EUR/USD : " + "{:.4f}".format(eurusd) + "\n"
     except:
         pass
-
     msg += "\n"
     articles = get_macro_news()
     if articles:
@@ -501,7 +498,6 @@ def get_morning_briefing():
             title = article.get("title", "").split(" - ")[0][:80]
             msg += "• " + title + "\n"
         msg += "\n"
-
     if articles:
         try:
             news_text = "\n".join([a.get("title", "") for a in articles[:4]])
@@ -515,7 +511,6 @@ def get_morning_briefing():
             msg += "🤖 *Analyse IA :*\n" + analyse + "\n\n"
         except:
             pass
-
     msg += "━━━━━━━━━━━━━━━━━━━━\n"
     msg += "_Bonne journée et bon trading ! 📈_"
     return msg
@@ -806,6 +801,11 @@ def get_blocked_message(user_id):
     annuel_url = create_checkout_session(user_id, STRIPE_PRICE_ANNUEL, "annuel")
     msg = "🚫 *Vous avez utilisé vos 5 questions gratuites.*\n\n"
     msg += "Pour continuer, choisissez votre abonnement :\n\n"
+    msg += "⭐ *Inclus dans chaque abonnement :*\n"
+    msg += "✅ Questions illimitées 24h/24\n"
+    msg += "✅ Signaux automatiques avec calcul de lots\n"
+    msg += "✅ Morning briefing à 8h30 tous les matins\n"
+    msg += "✅ Live exclusif chaque semaine réservé aux abonnés\n\n"
     if mensuel_url:
         msg += "📅 [Mensuel — 29,99€/mois](" + mensuel_url + ")\n"
     if trimestriel_url:
@@ -857,7 +857,14 @@ def stripe_webhook():
         if user_id:
             set_premium(int(user_id), True, plan, customer_id, subscription_id)
             try:
-                bot.send_message(int(user_id), "🎉 *Paiement confirmé !*\n\nBienvenue dans AutoTrade Premium !\nVous avez maintenant un accès illimité. 🚀\n\n🌅 Chaque matin à 8h30, vous recevrez votre briefing des marchés.\n\n📖 Tapez /aide pour voir toutes les commandes !", parse_mode="Markdown")
+                bot.send_message(int(user_id),
+                    "🎉 *Paiement confirmé !*\n\nBienvenue dans AutoTrade Premium ! 🚀\n\n"
+                    "✅ Questions illimitées 24h/24\n"
+                    "✅ Signaux automatiques avec calcul de lots\n"
+                    "✅ Morning briefing à 8h30 tous les matins\n"
+                    "✅ Live exclusif chaque semaine\n\n"
+                    "📖 Tapez /aide pour voir toutes les commandes !",
+                    parse_mode="Markdown")
             except:
                 pass
 
@@ -930,6 +937,9 @@ Je suis votre assistant trading personnel, disponible 24h/24 et 7j/7.
 ✅ Analyse de vos graphiques TradingView
 ✅ Niveaux clés — Support, Résistance, Objectifs
 ✅ Gestion du risque personnalisée
+✅ Live exclusif chaque semaine réservé aux abonnés
+
+📖 Tapez /aide pour voir toutes les commandes
 
 _Avant de commencer, j'ai besoin de 3 informations rapides_ 👇""", parse_mode="Markdown")
     time.sleep(1)
@@ -1014,7 +1024,7 @@ def change_risk(message):
 def send_subscription(message):
     user_id = message.from_user.id
     if is_premium(user_id):
-        bot.reply_to(message, "✅ Vous êtes déjà membre Premium ! Profitez de vos questions illimitées. 🚀")
+        bot.reply_to(message, "✅ Vous êtes déjà membre Premium ! Profitez de vos avantages exclusifs. 🚀")
         return
     msg = get_blocked_message(user_id)
     bot.reply_to(message, msg, parse_mode="Markdown", disable_web_page_preview=True)
@@ -1036,7 +1046,14 @@ def activate_premium(message):
         set_premium(target_id, True, "test")
         bot.reply_to(message, "✅ Utilisateur " + str(target_id) + " activé en Premium !")
         try:
-            bot.send_message(target_id, "🎉 *Accès Premium activé !*\n\nVous avez maintenant un accès illimité à AutoTrade Bot.\n\n🌅 Chaque matin à 8h30, vous recevrez votre briefing des marchés.\n\n📖 Tapez /aide pour voir toutes les commandes ! 🚀", parse_mode="Markdown")
+            bot.send_message(target_id,
+                "🎉 *Accès Premium activé !*\n\n"
+                "✅ Questions illimitées 24h/24\n"
+                "✅ Signaux automatiques avec calcul de lots\n"
+                "✅ Morning briefing à 8h30 tous les matins\n"
+                "✅ Live exclusif chaque semaine\n\n"
+                "📖 Tapez /aide pour voir toutes les commandes ! 🚀",
+                parse_mode="Markdown")
         except:
             pass
     else:
@@ -1056,7 +1073,7 @@ def revoke_premium(message):
         clear_history(target_id)
         bot.reply_to(message, "✅ Accès Premium révoqué pour " + str(target_id))
         try:
-            bot.send_message(target_id, "❌ Votre accès test AutoTrade a été révoqué.", parse_mode="Markdown")
+            bot.send_message(target_id, "❌ Votre accès AutoTrade a été révoqué.\n\nVous pouvez vous réabonner avec /abonnement.", parse_mode="Markdown")
         except:
             pass
     else:
@@ -1103,7 +1120,7 @@ def show_stats(message):
         msg += "🆓 Gratuits : *" + str(total_free) + "*\n"
         if total > 0:
             taux = round(total_premium / total * 100, 1)
-            msg += "📈 Taux de conversion : *" + str(taux) + "%*\n"
+            msg += "📈 Taux de conversion : *" + str(taux) + "%*"
         bot.reply_to(message, msg, parse_mode="Markdown")
     except Exception as e:
         bot.reply_to(message, "Erreur : " + str(e))
@@ -1115,7 +1132,7 @@ def broadcast_message(message):
         return
     text = message.text.replace("/broadcast", "").strip()
     if not text:
-        bot.reply_to(message, "Usage : /broadcast Votre message\n\nExemple :\n/broadcast 🎯 Zoom ce soir 20h ! Lien : https://zoom.us/xxx\n\n_Envoi aux membres Premium uniquement._")
+        bot.reply_to(message, "Usage : /broadcast Votre message\n\nExemple :\n/broadcast 🎯 Zoom ce soir 20h — Lien : https://zoom.us/xxx\n\n_Envoi aux membres Premium uniquement._")
         return
     members = get_all_premium()
     if not members:
@@ -1139,7 +1156,7 @@ def upsell_message(message):
         return
     text = message.text.replace("/upsell", "").strip()
     if not text:
-        bot.reply_to(message, "Usage : /upsell Votre message\n\nExemple :\n/upsell 🚀 Accédez aux signaux en temps réel et au morning briefing ! Abonnez-vous : /abonnement\n\n_Envoi à TOUS les utilisateurs (gratuits + Premium)._")
+        bot.reply_to(message, "Usage : /upsell Votre message\n\nExemple :\n/upsell 🚀 Accédez aux signaux en temps réel et au morning briefing ! /abonnement\n\n_Envoi à TOUS les utilisateurs._")
         return
     users = get_all_users()
     if not users:
