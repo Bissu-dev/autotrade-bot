@@ -27,23 +27,15 @@ CANAL_ID = -1003587224431
 TIMEZONE = pytz.timezone("Europe/Paris")
 
 stripe.api_key = STRIPE_SECRET_KEY
-
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 app = Flask(__name__)
 
 MAX_FREE_QUESTIONS = 5
 MAX_HISTORY = 20
-
-PRICE_ONLY_KEYWORDS = [
-    "cours", "prix", "price", "combien", "coute", "vaut", "valeur",
-    "cote", "coté", "tarif", "quote", "rate"
-]
-
 TP_REPARTITION = [0.40, 0.25, 0.15, 0.10, 0.05, 0.03, 0.02]
 BROKERS = ["Vantage", "VT Markets", "StarTrader", "ACY Trading", "Puprime", "Autre"]
-RISK_OPTIONS = ["1%", "2.5%", "5%", "10%", "Personnalisé"]
-
+RISK_OPTIONS_LABELS = ["1%", "2.5%", "5%", "10%"]
 SIGNAL_DIRECTIONS = ["SELL", "BUY", "LONG", "SHORT"]
 SIGNAL_ASSETS = {
     "BTC": "BTCUSD", "BITCOIN": "BTCUSD", "BTCUSD": "BTCUSD",
@@ -68,15 +60,471 @@ SIGNAL_ASSETS = {
     "OIL": "OILUSD", "PETROLE": "OILUSD", "WTI": "OILUSD",
 }
 
-def is_price_only_request(text):
+# ============================================================
+# DICTIONNAIRE DE TRADUCTIONS
+# ============================================================
+T = {
+    "welcome": {
+        "fr": """👋 *Bienvenue sur AutoTrade Bot !*
+
+Je suis votre assistant trading personnel, disponible 24h/24 et 7j/7.
+
+💹 *Ce que je peux faire pour vous :*
+
+✅ Prix en temps réel — Crypto, Forex, Or, Indices
+✅ Signaux automatiques avec calcul de lots
+✅ Morning briefing à 8h30 tous les matins
+✅ Analyse de vos graphiques TradingView
+✅ Niveaux clés — Support, Résistance, Objectifs
+✅ Gestion du risque personnalisée
+✅ Live exclusif chaque semaine réservé aux abonnés
+
+📖 Tapez /aide pour voir toutes les commandes
+
+_Avant de commencer, j'ai besoin de 3 informations rapides_ 👇""",
+
+        "en": """👋 *Welcome to AutoTrade Bot!*
+
+I am your personal trading assistant, available 24/7.
+
+💹 *What I can do for you:*
+
+✅ Real-time prices — Crypto, Forex, Gold, Indices
+✅ Automatic signals with lot calculation
+✅ Morning briefing every day at 8:30 AM
+✅ TradingView chart analysis
+✅ Key levels — Support, Resistance, Targets
+✅ Personalized risk management
+✅ Exclusive weekly live for subscribers only
+
+📖 Type /help to see all commands
+
+_Before we start, I need 3 quick details_ 👇""",
+
+        "it": """👋 *Benvenuto su AutoTrade Bot!*
+
+Sono il tuo assistente di trading personale, disponibile 24 ore su 24, 7 giorni su 7.
+
+💹 *Cosa posso fare per te:*
+
+✅ Prezzi in tempo reale — Crypto, Forex, Oro, Indici
+✅ Segnali automatici con calcolo dei lotti
+✅ Morning briefing ogni mattina alle 8:30
+✅ Analisi dei grafici TradingView
+✅ Livelli chiave — Supporto, Resistenza, Obiettivi
+✅ Gestione del rischio personalizzata
+✅ Live esclusivo ogni settimana per gli abbonati
+
+📖 Digita /aiuto per vedere tutti i comandi
+
+_Prima di iniziare, ho bisogno di 3 informazioni rapide_ 👇""",
+
+        "es": """👋 *¡Bienvenido a AutoTrade Bot!*
+
+Soy tu asistente de trading personal, disponible las 24 horas del día, los 7 días de la semana.
+
+💹 *Lo que puedo hacer por ti:*
+
+✅ Precios en tiempo real — Cripto, Forex, Oro, Índices
+✅ Señales automáticas con cálculo de lotes
+✅ Morning briefing todos los días a las 8:30
+✅ Análisis de gráficos TradingView
+✅ Niveles clave — Soporte, Resistencia, Objetivos
+✅ Gestión de riesgo personalizada
+✅ Live exclusivo cada semana para suscriptores
+
+📖 Escribe /ayuda para ver todos los comandos
+
+_Antes de empezar, necesito 3 datos rápidos_ 👇""",
+    },
+
+    "choose_lang": {
+        "fr": "🌍 *Choisissez votre langue / Choose your language / Scegli la lingua / Elige tu idioma :*",
+        "en": "🌍 *Choisissez votre langue / Choose your language / Scegli la lingua / Elige tu idioma :*",
+        "it": "🌍 *Choisissez votre langue / Choose your language / Scegli la lingua / Elige tu idioma :*",
+        "es": "🌍 *Choisissez votre langue / Choose your language / Scegli la lingua / Elige tu idioma :*",
+    },
+
+    "lang_saved": {
+        "fr": "✅ Langue définie : Français",
+        "en": "✅ Language set: English",
+        "it": "✅ Lingua impostata: Italiano",
+        "es": "✅ Idioma establecido: Español",
+    },
+
+    "choose_broker": {
+        "fr": "🏦 *Quel broker utilisez-vous ?*\n\n_Sélectionnez dans la liste :_",
+        "en": "🏦 *Which broker do you use?*\n\n_Select from the list:_",
+        "it": "🏦 *Quale broker utilizzi?*\n\n_Seleziona dalla lista:_",
+        "es": "🏦 *¿Qué broker utilizas?*\n\n_Selecciona de la lista:_",
+    },
+
+    "broker_saved": {
+        "fr": "✅ Broker : *{broker}*\n\n💰 *Quel est votre capital de trading ?*\n_(ex: 2000 pour 2000€)_",
+        "en": "✅ Broker: *{broker}*\n\n💰 *What is your trading capital?*\n_(e.g. 2000 for €2000)_",
+        "it": "✅ Broker: *{broker}*\n\n💰 *Qual è il tuo capitale di trading?*\n_(es: 2000 per €2000)_",
+        "es": "✅ Broker: *{broker}*\n\n💰 *¿Cuál es tu capital de trading?*\n_(ej: 2000 para €2000)_",
+    },
+
+    "invalid_broker": {
+        "fr": "⚠️ Veuillez sélectionner un broker dans la liste.",
+        "en": "⚠️ Please select a broker from the list.",
+        "it": "⚠️ Per favore seleziona un broker dalla lista.",
+        "es": "⚠️ Por favor selecciona un broker de la lista.",
+    },
+
+    "invalid_capital": {
+        "fr": "⚠️ Veuillez entrer un montant valide (ex: 2000)",
+        "en": "⚠️ Please enter a valid amount (e.g. 2000)",
+        "it": "⚠️ Per favore inserisci un importo valido (es: 2000)",
+        "es": "⚠️ Por favor ingresa un monto válido (ej: 2000)",
+    },
+
+    "choose_risk": {
+        "fr": "📊 *Quel % de risque par trade ?*\n\n• 1% = conservateur\n• 2.5% = modéré\n• 5% = agressif\n• 10% = très agressif",
+        "en": "📊 *What % risk per trade?*\n\n• 1% = conservative\n• 2.5% = moderate\n• 5% = aggressive\n• 10% = very aggressive",
+        "it": "📊 *Quale % di rischio per trade?*\n\n• 1% = conservativo\n• 2.5% = moderato\n• 5% = aggressivo\n• 10% = molto aggressivo",
+        "es": "📊 *¿Qué % de riesgo por operación?*\n\n• 1% = conservador\n• 2.5% = moderado\n• 5% = agresivo\n• 10% = muy agresivo",
+    },
+
+    "custom_risk": {
+        "fr": "Personnalisé",
+        "en": "Custom",
+        "it": "Personalizzato",
+        "es": "Personalizado",
+    },
+
+    "enter_custom_risk": {
+        "fr": "✏️ *Entrez votre % de risque personnalisé*\n_(ex: 3 pour 3%)_",
+        "en": "✏️ *Enter your custom risk %*\n_(e.g. 3 for 3%)_",
+        "it": "✏️ *Inserisci la tua % di rischio personalizzata*\n_(es: 3 per 3%)_",
+        "es": "✏️ *Ingresa tu % de riesgo personalizado*\n_(ej: 3 para 3%)_",
+    },
+
+    "invalid_risk": {
+        "fr": "⚠️ Entrez un nombre valide (ex: 3)",
+        "en": "⚠️ Enter a valid number (e.g. 3)",
+        "it": "⚠️ Inserisci un numero valido (es: 3)",
+        "es": "⚠️ Ingresa un número válido (ej: 3)",
+    },
+
+    "profile_complete": {
+        "fr": "✅ *Profil configuré !*\n\n🏦 Broker : *{broker}*\n💰 Capital : *{capital}€*\n📊 Risque : *{risk}%* ({risk_eur}€ par trade)\n\n_Modifier : /broker, /capital ou /risque_\n\n📖 Tapez /aide pour voir toutes les commandes\n🎁 Vous avez *5 questions gratuites* — Postez votre question ou screenshot ! 📈",
+        "en": "✅ *Profile configured!*\n\n🏦 Broker: *{broker}*\n💰 Capital: *{capital}€*\n📊 Risk: *{risk}%* ({risk_eur}€ per trade)\n\n_Edit: /broker, /capital or /risk_\n\n📖 Type /help to see all commands\n🎁 You have *5 free questions* — Post your question or screenshot! 📈",
+        "it": "✅ *Profilo configurato!*\n\n🏦 Broker: *{broker}*\n💰 Capitale: *{capital}€*\n📊 Rischio: *{risk}%* ({risk_eur}€ per trade)\n\n_Modifica: /broker, /capitale o /rischio_\n\n📖 Digita /aiuto per vedere tutti i comandi\n🎁 Hai *5 domande gratuite* — Pubblica la tua domanda o screenshot! 📈",
+        "es": "✅ *¡Perfil configurado!*\n\n🏦 Broker: *{broker}*\n💰 Capital: *{capital}€*\n📊 Riesgo: *{risk}%* ({risk_eur}€ por operación)\n\n_Editar: /broker, /capital o /riesgo_\n\n📖 Escribe /ayuda para ver todos los comandos\n🎁 Tienes *5 preguntas gratuitas* — ¡Publica tu pregunta o screenshot! 📈",
+    },
+
+    "new_signal": {
+        "fr": "📡 *Nouveau signal !*\n\n{signal}\n\n💰 *Quel est votre capital actuel ?*{capital_info}\n_(ex: 2000)_",
+        "en": "📡 *New signal!*\n\n{signal}\n\n💰 *What is your current capital?*{capital_info}\n_(e.g. 2000)_",
+        "it": "📡 *Nuovo segnale!*\n\n{signal}\n\n💰 *Qual è il tuo capitale attuale?*{capital_info}\n_(es: 2000)_",
+        "es": "📡 *¡Nueva señal!*\n\n{signal}\n\n💰 *¿Cuál es tu capital actual?*{capital_info}\n_(ej: 2000)_",
+    },
+
+    "last_capital": {
+        "fr": "\n_Dernier capital enregistré : {capital}€_",
+        "en": "\n_Last recorded capital: {capital}€_",
+        "it": "\n_Ultimo capitale registrato: {capital}€_",
+        "es": "\n_Último capital registrado: {capital}€_",
+    },
+
+    "signal_error": {
+        "fr": "⚠️ Impossible de calculer les lots pour ce signal.",
+        "en": "⚠️ Unable to calculate lots for this signal.",
+        "it": "⚠️ Impossibile calcolare i lotti per questo segnale.",
+        "es": "⚠️ No se pueden calcular los lotes para esta señal.",
+    },
+
+    "analyzing": {
+        "fr": "🔍 Analyse du graphique en cours...",
+        "en": "🔍 Analyzing chart...",
+        "it": "🔍 Analisi del grafico in corso...",
+        "es": "🔍 Analizando gráfico...",
+    },
+
+    "morning_generating": {
+        "fr": "⏳ Génération du briefing en cours...",
+        "en": "⏳ Generating briefing...",
+        "it": "⏳ Generazione del briefing in corso...",
+        "es": "⏳ Generando briefing...",
+    },
+
+    "morning_premium_only": {
+        "fr": "⭐ Cette fonctionnalité est réservée aux membres Premium.\n\nAbonnez-vous avec /abonnement 🚀",
+        "en": "⭐ This feature is reserved for Premium members.\n\nSubscribe with /subscription 🚀",
+        "it": "⭐ Questa funzionalità è riservata ai membri Premium.\n\nAbbonati con /abbonamento 🚀",
+        "es": "⭐ Esta función está reservada para miembros Premium.\n\nSuscríbete con /suscripcion 🚀",
+    },
+
+    "already_premium": {
+        "fr": "✅ Vous êtes déjà membre Premium ! Profitez de vos avantages exclusifs. 🚀",
+        "en": "✅ You are already a Premium member! Enjoy your exclusive benefits. 🚀",
+        "it": "✅ Sei già un membro Premium! Goditi i tuoi vantaggi esclusivi. 🚀",
+        "es": "✅ ¡Ya eres miembro Premium! Disfruta de tus beneficios exclusivos. 🚀",
+    },
+
+    "new_conversation": {
+        "fr": "🔄 Nouvelle conversation démarrée !",
+        "en": "🔄 New conversation started!",
+        "it": "🔄 Nuova conversazione avviata!",
+        "es": "🔄 ¡Nueva conversación iniciada!",
+    },
+
+    "profil": {
+        "fr": "👤 *Votre profil :*\n\n🏦 Broker : *{broker}*\n💰 Capital initial : *{capital_initial}*\n💰 Capital actuel : *{capital}*{perf}\n📊 Risque : *{risk}%* ({risk_eur}€ par trade)\n⭐ Statut : *{status}*\n\n_Modifier : /broker, /capital ou /risque_",
+        "en": "👤 *Your profile:*\n\n🏦 Broker: *{broker}*\n💰 Initial capital: *{capital_initial}*\n💰 Current capital: *{capital}*{perf}\n📊 Risk: *{risk}%* ({risk_eur}€ per trade)\n⭐ Status: *{status}*\n\n_Edit: /broker, /capital or /risk_",
+        "it": "👤 *Il tuo profilo:*\n\n🏦 Broker: *{broker}*\n💰 Capitale iniziale: *{capital_initial}*\n💰 Capitale attuale: *{capital}*{perf}\n📊 Rischio: *{risk}%* ({risk_eur}€ per trade)\n⭐ Stato: *{status}*\n\n_Modifica: /broker, /capitale o /rischio_",
+        "es": "👤 *Tu perfil:*\n\n🏦 Broker: *{broker}*\n💰 Capital inicial: *{capital_initial}*\n💰 Capital actual: *{capital}*{perf}\n📊 Riesgo: *{risk}%* ({risk_eur}€ por operación)\n⭐ Estado: *{status}*\n\n_Editar: /broker, /capital o /riesgo_",
+    },
+
+    "premium_status": {
+        "fr": "✅ Premium",
+        "en": "✅ Premium",
+        "it": "✅ Premium",
+        "es": "✅ Premium",
+    },
+
+    "free_status": {
+        "fr": "❌ Gratuit",
+        "en": "❌ Free",
+        "it": "❌ Gratuito",
+        "es": "❌ Gratuito",
+    },
+
+    "not_found": {
+        "fr": "Aucun profil trouvé. Tapez /start pour commencer.",
+        "en": "No profile found. Type /start to begin.",
+        "it": "Nessun profilo trovato. Digita /start per iniziare.",
+        "es": "No se encontró perfil. Escribe /start para comenzar.",
+    },
+
+    "aide": {
+        "fr": """📖 *Commandes disponibles :*
+
+💹 *Trading*
+/morning — Briefing des marchés du jour ⭐
+/profil — Voir votre profil et performance
+
+⚙️ *Paramètres*
+/broker — Changer de broker
+/capital — Mettre à jour votre capital
+/risque — Modifier votre % de risque
+/nouveau — Nouvelle conversation
+/langue — Changer de langue
+
+💳 *Abonnement*
+/abonnement — Voir les offres Premium
+
+_Posez vos questions en texte ou envoyez un screenshot !_""",
+
+        "en": """📖 *Available commands:*
+
+💹 *Trading*
+/morning — Market briefing of the day ⭐
+/profile — View your profile and performance
+
+⚙️ *Settings*
+/broker — Change broker
+/capital — Update your capital
+/risk — Modify your risk %
+/new — New conversation
+/language — Change language
+
+💳 *Subscription*
+/subscription — View Premium offers
+
+_Ask questions in text or send a screenshot!_""",
+
+        "it": """📖 *Comandi disponibili:*
+
+💹 *Trading*
+/morning — Briefing di mercato del giorno ⭐
+/profilo — Visualizza il tuo profilo e performance
+
+⚙️ *Impostazioni*
+/broker — Cambia broker
+/capitale — Aggiorna il tuo capitale
+/rischio — Modifica la tua % di rischio
+/nuovo — Nuova conversazione
+/lingua — Cambia lingua
+
+💳 *Abbonamento*
+/abbonamento — Visualizza le offerte Premium
+
+_Fai domande in testo o invia uno screenshot!_""",
+
+        "es": """📖 *Comandos disponibles:*
+
+💹 *Trading*
+/morning — Briefing de mercado del día ⭐
+/perfil — Ver tu perfil y rendimiento
+
+⚙️ *Configuración*
+/broker — Cambiar broker
+/capital — Actualizar tu capital
+/riesgo — Modificar tu % de riesgo
+/nuevo — Nueva conversación
+/idioma — Cambiar idioma
+
+💳 *Suscripción*
+/suscripcion — Ver ofertas Premium
+
+_¡Haz preguntas en texto o envía una captura de pantalla!_""",
+    },
+
+    "subscription_included": {
+        "fr": "⭐ *Inclus dans chaque abonnement :*\n✅ Questions illimitées 24h/24\n✅ Signaux automatiques avec calcul de lots\n✅ Morning briefing à 8h30 tous les matins\n✅ Live exclusif chaque semaine réservé aux abonnés\n\n",
+        "en": "⭐ *Included in every subscription:*\n✅ Unlimited questions 24/7\n✅ Automatic signals with lot calculation\n✅ Morning briefing every day at 8:30 AM\n✅ Exclusive weekly live for subscribers only\n\n",
+        "it": "⭐ *Incluso in ogni abbonamento:*\n✅ Domande illimitate 24 ore su 24\n✅ Segnali automatici con calcolo dei lotti\n✅ Morning briefing ogni mattina alle 8:30\n✅ Live esclusivo ogni settimana per gli abbonati\n\n",
+        "es": "⭐ *Incluido en cada suscripción:*\n✅ Preguntas ilimitadas 24/7\n✅ Señales automáticas con cálculo de lotes\n✅ Morning briefing todos los días a las 8:30\n✅ Live exclusivo cada semana para suscriptores\n\n",
+    },
+
+    "subscription_blocked": {
+        "fr": "🚫 *Vous avez utilisé vos 5 questions gratuites.*\n\nPour continuer, choisissez votre abonnement :\n\n",
+        "en": "🚫 *You have used your 5 free questions.*\n\nTo continue, choose your subscription:\n\n",
+        "it": "🚫 *Hai utilizzato le tue 5 domande gratuite.*\n\nPer continuare, scegli il tuo abbonamento:\n\n",
+        "es": "🚫 *Has usado tus 5 preguntas gratuitas.*\n\nPara continuar, elige tu suscripción:\n\n",
+    },
+
+    "subscription_secure": {
+        "fr": "\n✅ Paiement sécurisé par Stripe",
+        "en": "\n✅ Secure payment by Stripe",
+        "it": "\n✅ Pagamento sicuro tramite Stripe",
+        "es": "\n✅ Pago seguro por Stripe",
+    },
+
+    "premium_activated": {
+        "fr": "🎉 *Accès Premium activé !*\n\n✅ Questions illimitées 24h/24\n✅ Signaux automatiques avec calcul de lots\n✅ Morning briefing à 8h30 tous les matins\n✅ Live exclusif chaque semaine\n\n📖 Tapez /aide pour voir toutes les commandes ! 🚀",
+        "en": "🎉 *Premium access activated!*\n\n✅ Unlimited questions 24/7\n✅ Automatic signals with lot calculation\n✅ Morning briefing every day at 8:30 AM\n✅ Exclusive weekly live\n\n📖 Type /help to see all commands! 🚀",
+        "it": "🎉 *Accesso Premium attivato!*\n\n✅ Domande illimitate 24 ore su 24\n✅ Segnali automatici con calcolo dei lotti\n✅ Morning briefing ogni mattina alle 8:30\n✅ Live esclusivo ogni settimana\n\n📖 Digita /aiuto per vedere tutti i comandi! 🚀",
+        "es": "🎉 *¡Acceso Premium activado!*\n\n✅ Preguntas ilimitadas 24/7\n✅ Señales automáticas con cálculo de lotes\n✅ Morning briefing todos los días a las 8:30\n✅ Live exclusivo cada semana\n\n📖 Escribe /ayuda para ver todos los comandos! 🚀",
+    },
+
+    "payment_confirmed": {
+        "fr": "🎉 *Paiement confirmé !*\n\nBienvenue dans AutoTrade Premium ! 🚀\n\n✅ Questions illimitées 24h/24\n✅ Signaux automatiques avec calcul de lots\n✅ Morning briefing à 8h30 tous les matins\n✅ Live exclusif chaque semaine\n\n📖 Tapez /aide pour voir toutes les commandes !",
+        "en": "🎉 *Payment confirmed!*\n\nWelcome to AutoTrade Premium! 🚀\n\n✅ Unlimited questions 24/7\n✅ Automatic signals with lot calculation\n✅ Morning briefing every day at 8:30 AM\n✅ Exclusive weekly live\n\n📖 Type /help to see all commands!",
+        "it": "🎉 *Pagamento confermato!*\n\nBenvenuto in AutoTrade Premium! 🚀\n\n✅ Domande illimitate 24 ore su 24\n✅ Segnali automatici con calcolo dei lotti\n✅ Morning briefing ogni mattina alle 8:30\n✅ Live esclusivo ogni settimana\n\n📖 Digita /aiuto per vedere tutti i comandi!",
+        "es": "🎉 *¡Pago confirmado!*\n\n¡Bienvenido a AutoTrade Premium! 🚀\n\n✅ Preguntas ilimitadas 24/7\n✅ Señales automáticas con cálculo de lotes\n✅ Morning briefing todos los días a las 8:30\n✅ Live exclusivo cada semana\n\n📖 Escribe /ayuda para ver todos los comandos!",
+    },
+
+    "subscription_cancelled": {
+        "fr": "❌ Votre abonnement AutoTrade a été annulé.\n\nVous pouvez vous réabonner avec /abonnement.",
+        "en": "❌ Your AutoTrade subscription has been cancelled.\n\nYou can resubscribe with /subscription.",
+        "it": "❌ Il tuo abbonamento AutoTrade è stato annullato.\n\nPuoi riabbonarti con /abbonamento.",
+        "es": "❌ Tu suscripción AutoTrade ha sido cancelada.\n\nPuedes volver a suscribirte con /suscripcion.",
+    },
+
+    "footer_premium": {
+        "fr": "\n\n_✨ Membre Premium_",
+        "en": "\n\n_✨ Premium Member_",
+        "it": "\n\n_✨ Membro Premium_",
+        "es": "\n\n_✨ Miembro Premium_",
+    },
+
+    "footer_free": {
+        "fr": "\n\n_{count} question(s) gratuite(s) restante(s)_",
+        "en": "\n\n_{count} free question(s) remaining_",
+        "it": "\n\n_{count} domanda/e gratuita/e rimanente/i_",
+        "es": "\n\n_{count} pregunta(s) gratuita(s) restante(s)_",
+    },
+
+    "morning_title": {
+        "fr": "🌅 *Morning Briefing — {date}*\n",
+        "en": "🌅 *Morning Briefing — {date}*\n",
+        "it": "🌅 *Morning Briefing — {date}*\n",
+        "es": "🌅 *Morning Briefing — {date}*\n",
+    },
+
+    "morning_markets": {
+        "fr": "📊 *Marchés en temps réel :*\n",
+        "en": "📊 *Real-time markets:*\n",
+        "it": "📊 *Mercati in tempo reale:*\n",
+        "es": "📊 *Mercados en tiempo real:*\n",
+    },
+
+    "morning_news": {
+        "fr": "📰 *News à surveiller :*\n\n",
+        "en": "📰 *News to watch:*\n\n",
+        "it": "📰 *Notizie da seguire:*\n\n",
+        "es": "📰 *Noticias a seguir:*\n\n",
+    },
+
+    "morning_ai": {
+        "fr": "🤖 *Analyse IA :*\n",
+        "en": "🤖 *AI Analysis:*\n",
+        "it": "🤖 *Analisi IA:*\n",
+        "es": "🤖 *Análisis IA:*\n",
+    },
+
+    "morning_footer": {
+        "fr": "_Bonne journée et bon trading ! 📈_",
+        "en": "_Have a great day and good trading! 📈_",
+        "it": "_Buona giornata e buon trading! 📈_",
+        "es": "_¡Que tengas un gran día y buen trading! 📈_",
+    },
+
+    "signal_lots_header": {
+        "fr": "📊 *Tailles de lot par TP :*\n\n",
+        "en": "📊 *Lot sizes per TP:*\n\n",
+        "it": "📊 *Dimensioni del lotto per TP:*\n\n",
+        "es": "📊 *Tamaños de lote por TP:*\n\n",
+    },
+
+    "signal_optional": {
+        "fr": " _(optionnel)_",
+        "en": " _(optional)_",
+        "it": " _(opzionale)_",
+        "es": " _(opcional)_",
+    },
+
+    "signal_footer": {
+        "fr": "⚠️ _Tailles indicatives — adaptez selon votre levier_",
+        "en": "⚠️ _Indicative sizes — adjust according to your leverage_",
+        "it": "⚠️ _Dimensioni indicative — adatta in base alla tua leva_",
+        "es": "⚠️ _Tamaños indicativos — ajusta según tu apalancamiento_",
+    },
+
+    "image_error": {
+        "fr": "Impossible de lire l'image.",
+        "en": "Unable to read the image.",
+        "it": "Impossibile leggere l'immagine.",
+        "es": "No se puede leer la imagen.",
+    },
+
+    "change_capital": {
+        "fr": "💰 *Quel est votre capital actuel ?*\n_(ex: 2000 pour 2000€)_",
+        "en": "💰 *What is your current capital?*\n_(e.g. 2000 for €2000)_",
+        "it": "💰 *Qual è il tuo capitale attuale?*\n_(es: 2000 per €2000)_",
+        "es": "💰 *¿Cuál es tu capital actual?*\n_(ej: 2000 para €2000)_",
+    },
+}
+
+def t(key, lang, **kwargs):
+    """Retourne le texte traduit dans la bonne langue"""
+    text = T.get(key, {}).get(lang, T.get(key, {}).get("fr", ""))
+    for k, v in kwargs.items():
+        text = text.replace("{" + k + "}", str(v))
+    return text
+
+PRICE_ONLY_KEYWORDS = {
+    "fr": ["cours", "prix", "combien", "coute", "vaut", "valeur", "cote", "tarif"],
+    "en": ["price", "cost", "worth", "value", "rate", "how much", "quote"],
+    "it": ["prezzo", "quanto", "vale", "valore", "costo", "quotazione"],
+    "es": ["precio", "cuanto", "vale", "valor", "costo", "cotizacion"],
+}
+
+def is_price_only_request(text, lang="fr"):
     text_lower = text.lower()
-    has_price_keyword = any(w in text_lower for w in PRICE_ONLY_KEYWORDS)
-    has_analysis_keyword = any(w in text_lower for w in [
-        "analyse", "analysis", "resistance", "support", "tendance",
-        "signal", "lot", "strategie", "avis", "opinion", "bullish",
-        "bearish", "haussier", "baissier", "pourquoi", "comment"
+    keywords = PRICE_ONLY_KEYWORDS.get(lang, PRICE_ONLY_KEYWORDS["fr"])
+    has_price = any(w in text_lower for w in keywords)
+    has_analysis = any(w in text_lower for w in [
+        "analyse", "analysis", "analisi", "analisis",
+        "resistance", "support", "tendance", "trend",
+        "signal", "lot", "strategie", "strategy", "strategia",
+        "bullish", "bearish", "pourquoi", "why", "perche", "porque"
     ])
-    return has_price_keyword and not has_analysis_keyword
+    return has_price and not has_analysis
 
 def get_db():
     return psycopg2.connect(DATABASE_URL)
@@ -97,6 +545,7 @@ def init_db():
             capital_initial FLOAT,
             risk_percent FLOAT DEFAULT 1.0,
             onboarding_step INTEGER DEFAULT 0,
+            langue TEXT DEFAULT 'fr',
             alerte_danger_envoyee BOOLEAN DEFAULT FALSE,
             alerte_profit_envoyee BOOLEAN DEFAULT FALSE,
             created_at TIMESTAMP DEFAULT NOW(),
@@ -106,6 +555,7 @@ def init_db():
     for col in [
         "broker TEXT", "capital FLOAT", "capital_initial FLOAT",
         "risk_percent FLOAT DEFAULT 1.0", "onboarding_step INTEGER DEFAULT 0",
+        "langue TEXT DEFAULT 'fr'",
         "alerte_danger_envoyee BOOLEAN DEFAULT FALSE",
         "alerte_profit_envoyee BOOLEAN DEFAULT FALSE"
     ]:
@@ -141,7 +591,7 @@ def get_user(user_id):
         cur.execute("""
             SELECT telegram_id, is_premium, question_count, stripe_customer_id,
             subscription_id, plan, broker, capital, capital_initial, risk_percent,
-            onboarding_step, alerte_danger_envoyee, alerte_profit_envoyee
+            onboarding_step, langue, alerte_danger_envoyee, alerte_profit_envoyee
             FROM users WHERE telegram_id = %s
         """, (user_id,))
         row = cur.fetchone()
@@ -150,17 +600,24 @@ def get_user(user_id):
         if row:
             cols = ["telegram_id", "is_premium", "question_count", "stripe_customer_id",
                     "subscription_id", "plan", "broker", "capital", "capital_initial",
-                    "risk_percent", "onboarding_step", "alerte_danger_envoyee", "alerte_profit_envoyee"]
+                    "risk_percent", "onboarding_step", "langue",
+                    "alerte_danger_envoyee", "alerte_profit_envoyee"]
             return dict(zip(cols, row))
         return None
     except:
         return None
 
+def get_lang(user_id):
+    user = get_user(user_id)
+    if user and user.get("langue"):
+        return user["langue"]
+    return "fr"
+
 def get_all_premium():
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("SELECT telegram_id, plan FROM users WHERE is_premium = TRUE")
+        cur.execute("SELECT telegram_id, plan, langue FROM users WHERE is_premium = TRUE")
         rows = cur.fetchall()
         cur.close()
         conn.close()
@@ -180,32 +637,16 @@ def get_all_users():
     except:
         return []
 
-def set_onboarding_step(user_id, step):
+def set_field(user_id, field, value):
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO users (telegram_id, onboarding_step)
+        cur.execute(f"""
+            INSERT INTO users (telegram_id, {field})
             VALUES (%s, %s)
             ON CONFLICT (telegram_id)
-            DO UPDATE SET onboarding_step = %s, updated_at = NOW()
-        """, (user_id, step, step))
-        conn.commit()
-        cur.close()
-        conn.close()
-    except:
-        pass
-
-def set_broker(user_id, broker):
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO users (telegram_id, broker)
-            VALUES (%s, %s)
-            ON CONFLICT (telegram_id)
-            DO UPDATE SET broker = %s, updated_at = NOW()
-        """, (user_id, broker, broker))
+            DO UPDATE SET {field} = %s, updated_at = NOW()
+        """, (user_id, value, value))
         conn.commit()
         cur.close()
         conn.close()
@@ -235,72 +676,6 @@ def set_capital(user_id, capital, is_initial=False):
         conn.close()
     except:
         pass
-
-def set_risk(user_id, risk_percent):
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO users (telegram_id, risk_percent)
-            VALUES (%s, %s)
-            ON CONFLICT (telegram_id)
-            DO UPDATE SET risk_percent = %s, updated_at = NOW()
-        """, (user_id, risk_percent, risk_percent))
-        conn.commit()
-        cur.close()
-        conn.close()
-    except:
-        pass
-
-def check_and_send_alerts(user_id, capital_actuel):
-    try:
-        user = get_user(user_id)
-        if not user:
-            return
-        capital_initial = user.get("capital_initial") or capital_actuel
-        broker = user.get("broker", "?")
-        alerte_danger = user.get("alerte_danger_envoyee", False)
-        alerte_profit = user.get("alerte_profit_envoyee", False)
-        if capital_initial <= 0:
-            return
-        variation = ((capital_actuel - capital_initial) / capital_initial) * 100
-
-        if not alerte_danger and (capital_actuel < 250 or variation <= -50):
-            msg = "🔴 *ALERTE DANGER — Client en difficulté*\n\n"
-            msg += "👤 ID : " + str(user_id) + "\n"
-            msg += "🏦 Broker : " + broker + "\n"
-            msg += "💰 Capital initial : " + str(capital_initial) + "€\n"
-            msg += "📉 Capital actuel : " + str(capital_actuel) + "€\n"
-            msg += "📊 Variation : *" + "{:+.1f}".format(variation) + "%*\n"
-            if capital_actuel < 250:
-                msg += "⚠️ Capital sous 250€ — intervention recommandée"
-            else:
-                msg += "⚠️ Perte > 50% — intervention recommandée"
-            bot.send_message(ADMIN_ID, msg, parse_mode="Markdown")
-            conn = get_db()
-            cur = conn.cursor()
-            cur.execute("UPDATE users SET alerte_danger_envoyee = TRUE WHERE telegram_id = %s", (user_id,))
-            conn.commit()
-            cur.close()
-            conn.close()
-
-        if not alerte_profit and variation >= 100:
-            msg = "🟢 *ALERTE PERFORMANCE — Client en forte progression*\n\n"
-            msg += "👤 ID : " + str(user_id) + "\n"
-            msg += "🏦 Broker : " + broker + "\n"
-            msg += "💰 Capital initial : " + str(capital_initial) + "€\n"
-            msg += "📈 Capital actuel : " + str(capital_actuel) + "€\n"
-            msg += "📊 Performance : *+" + "{:.1f}".format(variation) + "%*\n"
-            msg += "💡 À orienter vers une offre supérieure"
-            bot.send_message(ADMIN_ID, msg, parse_mode="Markdown")
-            conn = get_db()
-            cur = conn.cursor()
-            cur.execute("UPDATE users SET alerte_profit_envoyee = TRUE WHERE telegram_id = %s", (user_id,))
-            conn.commit()
-            cur.close()
-            conn.close()
-    except Exception as e:
-        print("Erreur alerte : " + str(e))
 
 def is_premium(user_id):
     try:
@@ -351,7 +726,8 @@ def set_premium(user_id, status=True, plan=None, stripe_customer_id=None, subscr
             VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (telegram_id)
             DO UPDATE SET is_premium = %s, plan = %s, stripe_customer_id = %s, subscription_id = %s, updated_at = NOW()
-        """, (user_id, status, plan, stripe_customer_id, subscription_id, status, plan, stripe_customer_id, subscription_id))
+        """, (user_id, status, plan, stripe_customer_id, subscription_id,
+              status, plan, stripe_customer_id, subscription_id))
         conn.commit()
         cur.close()
         conn.close()
@@ -438,115 +814,57 @@ def delete_pending_signal(user_id):
     except:
         pass
 
-def get_macro_news():
+def check_and_send_alerts(user_id, capital_actuel):
     try:
-        keywords = "Fed OR FOMC OR BCE OR Trump OR inflation OR interest rate OR crypto OR bitcoin OR gold OR dollar"
-        url = "https://newsapi.org/v2/everything?q=" + requests.utils.quote(keywords) + "&language=fr&sortBy=publishedAt&pageSize=5&apiKey=" + NEWS_API_KEY
-        r = requests.get(url, timeout=5)
-        data = r.json()
-        articles = data.get("articles", [])
-        if not articles:
-            url = "https://newsapi.org/v2/everything?q=" + requests.utils.quote(keywords) + "&language=en&sortBy=publishedAt&pageSize=5&apiKey=" + NEWS_API_KEY
-            r = requests.get(url, timeout=5)
-            data = r.json()
-            articles = data.get("articles", [])
-        return articles[:5]
-    except:
-        return []
+        user = get_user(user_id)
+        if not user:
+            return
+        capital_initial = user.get("capital_initial") or capital_actuel
+        broker = user.get("broker", "?")
+        alerte_danger = user.get("alerte_danger_envoyee", False)
+        alerte_profit = user.get("alerte_profit_envoyee", False)
+        if capital_initial <= 0:
+            return
+        variation = ((capital_actuel - capital_initial) / capital_initial) * 100
 
-def get_morning_briefing():
-    now = datetime.now(TIMEZONE)
-    date_str = now.strftime("%A %d %B %Y").capitalize()
-    msg = "🌅 *Morning Briefing — " + date_str + "*\n"
-    msg += "━━━━━━━━━━━━━━━━━━━━\n\n"
-    msg += "📊 *Marchés en temps réel :*\n"
-    try:
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true"
-        r = requests.get(url, timeout=5)
-        data = r.json()
-        btc = data["bitcoin"]["usd"]
-        btc_change = data["bitcoin"]["usd_24h_change"]
-        eth = data["ethereum"]["usd"]
-        eth_change = data["ethereum"]["usd_24h_change"]
-        btc_emoji = "🟢" if btc_change >= 0 else "🔴"
-        eth_emoji = "🟢" if eth_change >= 0 else "🔴"
-        msg += btc_emoji + " BTC : $" + "{:,.0f}".format(btc) + " (" + "{:+.1f}".format(btc_change) + "%)\n"
-        msg += eth_emoji + " ETH : $" + "{:,.0f}".format(eth) + " (" + "{:+.1f}".format(eth_change) + "%)\n"
-    except:
-        pass
-    try:
-        url = "https://api.gold-api.com/price/XAU"
-        r = requests.get(url, timeout=5)
-        data = r.json()
-        gold = data["price"]
-        msg += "🥇 OR : $" + "{:,.0f}".format(gold) + "/oz\n"
-    except:
-        pass
-    try:
-        url = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/EUR/USD"
-        r = requests.get(url, timeout=5)
-        data = r.json()
-        eurusd = (data[0]["spreadProfilePrices"][0]["ask"] + data[0]["spreadProfilePrices"][0]["bid"]) / 2
-        msg += "💱 EUR/USD : " + "{:.4f}".format(eurusd) + "\n"
-    except:
-        pass
-    msg += "\n"
-    articles = get_macro_news()
-    if articles:
-        msg += "📰 *News à surveiller :*\n\n"
-        for article in articles[:4]:
-            title = article.get("title", "").split(" - ")[0][:80]
-            msg += "• " + title + "\n"
-        msg += "\n"
-    if articles:
-        try:
-            news_text = "\n".join([a.get("title", "") for a in articles[:4]])
-            response = client.messages.create(
-                model="claude-opus-4-5",
-                max_tokens=200,
-                system="Tu es un expert en trading. En 2-3 phrases maximum, dis quel impact ces news peuvent avoir sur BTC, Gold et EUR/USD aujourd'hui. Sois direct et concis. Reponds en francais.",
-                messages=[{"role": "user", "content": "News du jour :\n" + news_text + "\n\nQuel impact sur les marchés ?"}]
-            )
-            analyse = response.content[0].text
-            msg += "🤖 *Analyse IA :*\n" + analyse + "\n\n"
-        except:
-            pass
-    msg += "━━━━━━━━━━━━━━━━━━━━\n"
-    msg += "_Bonne journée et bon trading ! 📈_"
-    return msg
+        if not alerte_danger and (capital_actuel < 250 or variation <= -50):
+            msg = "🔴 *ALERTE DANGER — Client en difficulté*\n\n"
+            msg += "👤 ID : " + str(user_id) + "\n"
+            msg += "🏦 Broker : " + broker + "\n"
+            msg += "💰 Capital initial : " + str(capital_initial) + "€\n"
+            msg += "📉 Capital actuel : " + str(capital_actuel) + "€\n"
+            msg += "📊 Variation : *" + "{:+.1f}".format(variation) + "%*\n"
+            msg += "🌍 Langue : " + str(user.get("langue", "fr")).upper() + "\n"
+            if capital_actuel < 250:
+                msg += "⚠️ Capital sous 250€ — intervention recommandée"
+            else:
+                msg += "⚠️ Perte > 50% — intervention recommandée"
+            bot.send_message(ADMIN_ID, msg, parse_mode="Markdown")
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute("UPDATE users SET alerte_danger_envoyee = TRUE WHERE telegram_id = %s", (user_id,))
+            conn.commit()
+            cur.close()
+            conn.close()
 
-def send_morning_briefing_to_all():
-    try:
-        briefing = get_morning_briefing()
-        members = get_all_premium()
-        sent = 0
-        for member in members:
-            try:
-                bot.send_message(member[0], briefing, parse_mode="Markdown")
-                sent += 1
-                time.sleep(0.1)
-            except:
-                pass
-        print("Morning briefing envoyé à " + str(sent) + " abonnés")
+        if not alerte_profit and variation >= 100:
+            msg = "🟢 *ALERTE PERFORMANCE — Client en forte progression*\n\n"
+            msg += "👤 ID : " + str(user_id) + "\n"
+            msg += "🏦 Broker : " + broker + "\n"
+            msg += "💰 Capital initial : " + str(capital_initial) + "€\n"
+            msg += "📈 Capital actuel : " + str(capital_actuel) + "€\n"
+            msg += "📊 Performance : *+" + "{:.1f}".format(variation) + "%*\n"
+            msg += "🌍 Langue : " + str(user.get("langue", "fr")).upper() + "\n"
+            msg += "💡 À orienter vers une offre supérieure"
+            bot.send_message(ADMIN_ID, msg, parse_mode="Markdown")
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute("UPDATE users SET alerte_profit_envoyee = TRUE WHERE telegram_id = %s", (user_id,))
+            conn.commit()
+            cur.close()
+            conn.close()
     except Exception as e:
-        print("Erreur morning briefing : " + str(e))
-
-def morning_briefing_scheduler():
-    already_sent_today = False
-    while True:
-        try:
-            now = datetime.now(TIMEZONE)
-            if now.hour == 8 and now.minute == 30 and not already_sent_today:
-                send_morning_briefing_to_all()
-                already_sent_today = True
-            elif now.hour == 8 and now.minute == 31:
-                already_sent_today = False
-            elif now.hour != 8:
-                already_sent_today = False
-            time.sleep(30)
-        except Exception as e:
-            print("Erreur scheduler : " + str(e))
-            time.sleep(30)
+        print("Erreur alerte : " + str(e))
 
 def is_trading_signal(text):
     text_upper = text.upper()
@@ -590,9 +908,8 @@ def calculate_lots(capital, risk_percent, signal):
     risque_total = capital * (risk_percent / 100)
     lot_total = risque_total / sl_distance
     lot_total = max(0.01, round(lot_total / 0.01) * 0.01)
-    tps = signal["tps"]
     result = []
-    for i, tp in enumerate(tps):
+    for i, tp in enumerate(signal["tps"]):
         pct = TP_REPARTITION[i] if i < len(TP_REPARTITION) else 0.02
         lot = max(0.01, round((lot_total * pct) / 0.01) * 0.01)
         tp_distance = abs(tp - entry)
@@ -600,18 +917,13 @@ def calculate_lots(capital, risk_percent, signal):
         risque_tp = round(lot * sl_distance, 2)
         rr = round(tp_distance / sl_distance, 1) if sl_distance > 0 else 0
         result.append({
-            "tp_num": i + 1,
-            "tp_price": tp,
-            "lot": lot,
-            "pct": int(pct * 100),
-            "risque": risque_tp,
-            "gain": gain_potentiel,
-            "rr": rr,
-            "optional": i >= 3
+            "tp_num": i + 1, "tp_price": tp, "lot": lot,
+            "pct": int(pct * 100), "risque": risque_tp,
+            "gain": gain_potentiel, "rr": rr, "optional": i >= 3
         })
     return result
 
-def format_signal_with_lots(signal, lots, capital, risk_percent, broker=""):
+def format_signal_with_lots(signal, lots, capital, risk_percent, lang="fr", broker=""):
     direction = signal.get("direction", "")
     asset = signal.get("asset", "")
     entry_low = signal.get("entry_low", "")
@@ -621,112 +933,133 @@ def format_signal_with_lots(signal, lots, capital, risk_percent, broker=""):
     broker_str = " — " + broker if broker else ""
     risque_total = round(capital * (risk_percent / 100), 2)
     msg = emoji + " *" + direction + " " + asset + "*" + broker_str + "\n"
-    msg += "💰 Entrée : " + str(entry_low) + " - " + str(entry_high) + "\n"
+    msg += "💰 " + ("Entrée" if lang == "fr" else "Entry" if lang == "en" else "Entrata" if lang == "it" else "Entrada") + " : " + str(entry_low) + " - " + str(entry_high) + "\n"
     msg += "🔐 Stop Loss : " + str(sl) + "\n"
-    msg += "💼 Capital : " + str(capital) + "€ | Risque : " + str(risk_percent) + "% (" + str(risque_total) + "€)\n\n"
-    msg += "📊 *Tailles de lot par TP :*\n\n"
+    msg += "💼 " + ("Capital" if lang != "es" else "Capital") + " : " + str(capital) + "€ | " + ("Risque" if lang == "fr" else "Risk" if lang == "en" else "Rischio" if lang == "it" else "Riesgo") + " : " + str(risk_percent) + "% (" + str(risque_total) + "€)\n\n"
+    msg += t("signal_lots_header", lang)
     for tp in lots:
-        optional_tag = " _(optionnel)_" if tp["optional"] else ""
+        optional_tag = t("signal_optional", lang) if tp["optional"] else ""
         msg += "TP" + str(tp["tp_num"]) + " — " + str(tp["tp_price"]) + optional_tag + "\n"
         msg += "   • Lot : *" + str(tp["lot"]) + "* (" + str(tp["pct"]) + "%)\n"
-        msg += "   • Risque : " + str(tp["risque"]) + "€ | Gain potentiel : " + str(tp["gain"]) + "€\n"
+        risk_label = "Risque" if lang == "fr" else "Risk" if lang == "en" else "Rischio" if lang == "it" else "Riesgo"
+        gain_label = "Gain potentiel" if lang == "fr" else "Potential gain" if lang == "en" else "Guadagno potenziale" if lang == "it" else "Ganancia potencial"
+        msg += "   • " + risk_label + " : " + str(tp["risque"]) + "€ | " + gain_label + " : " + str(tp["gain"]) + "€\n"
         msg += "   • R/R : 1:" + str(tp["rr"]) + "\n\n"
-    msg += "⚠️ _Tailles indicatives — adaptez selon votre levier_"
+    msg += t("signal_footer", lang)
     return msg
 
-CRYPTO_IDS = {
-    "btc": "bitcoin", "bitcoin": "bitcoin",
-    "eth": "ethereum", "ethereum": "ethereum",
-    "bnb": "binancecoin", "sol": "solana", "solana": "solana",
-    "xrp": "ripple", "ripple": "ripple",
-    "ada": "cardano", "doge": "dogecoin", "dogecoin": "dogecoin",
-    "dot": "polkadot", "matic": "matic-network",
-    "ltc": "litecoin", "avax": "avalanche-2", "link": "chainlink",
-}
-
-FOREX_SYMBOLS = {
-    "eurusd": ("EUR", "USD"), "eur/usd": ("EUR", "USD"),
-    "gbpusd": ("GBP", "USD"), "gbp/usd": ("GBP", "USD"),
-    "usdjpy": ("USD", "JPY"), "usd/jpy": ("USD", "JPY"),
-    "usdchf": ("USD", "CHF"), "usd/chf": ("USD", "CHF"),
-    "audusd": ("AUD", "USD"), "aud/usd": ("AUD", "USD"),
-    "usdcad": ("USD", "CAD"), "usd/cad": ("USD", "CAD"),
-    "euro dollar": ("EUR", "USD"),
-}
-
-COMMODITY_KEYWORDS = {
-    "gold": "XAU", "xau": "XAU",
-    "silver": "XAG", "argent": "XAG", "xag": "XAG",
-}
-
-OR_WORDS = ["or", "l'or", "du or", "l or", "xauusd", "xau/usd"]
-
-INDEX_SYMBOLS = {
-    "nasdaq": "^IXIC", "nasdaq100": "^NDX",
-    "sp500": "^GSPC", "s&p500": "^GSPC", "s&p 500": "^GSPC",
-    "cac40": "^FCHI", "cac 40": "^FCHI",
-    "dax": "^GDAXI",
-}
-
-def get_crypto_price(coin_id, symbol):
+def get_macro_news():
     try:
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=" + coin_id + "&vs_currencies=usd,eur&include_24hr_change=true"
+        keywords = "Fed OR FOMC OR BCE OR Trump OR inflation OR interest rate OR crypto OR bitcoin OR gold OR dollar"
+        url = "https://newsapi.org/v2/everything?q=" + requests.utils.quote(keywords) + "&language=fr&sortBy=publishedAt&pageSize=5&apiKey=" + NEWS_API_KEY
         r = requests.get(url, timeout=5)
         data = r.json()
-        price_usd = data[coin_id]["usd"]
-        price_eur = data[coin_id]["eur"]
-        change = data[coin_id]["usd_24h_change"]
-        emoji = "🟢" if change >= 0 else "🔴"
-        return emoji + " *" + symbol.upper() + "*\n💵 $" + "{:,.2f}".format(price_usd) + " USD\n💶 €" + "{:,.2f}".format(price_eur) + " EUR\n📊 24h: " + "{:+.2f}".format(change) + "%"
+        articles = data.get("articles", [])
+        if not articles:
+            url = "https://newsapi.org/v2/everything?q=" + requests.utils.quote(keywords) + "&language=en&sortBy=publishedAt&pageSize=5&apiKey=" + NEWS_API_KEY
+            r = requests.get(url, timeout=5)
+            data = r.json()
+            articles = data.get("articles", [])
+        return articles[:5]
     except:
-        return None
+        return []
 
-def get_forex_price(from_currency, to_currency):
+def get_morning_briefing(lang="fr"):
+    now = datetime.now(TIMEZONE)
+    date_str = now.strftime("%A %d %B %Y").capitalize()
+    msg = t("morning_title", lang, date=date_str)
+    msg += "━━━━━━━━━━━━━━━━━━━━\n\n"
+    msg += t("morning_markets", lang)
     try:
-        pair = from_currency + "/" + to_currency
-        url = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/" + from_currency + "/" + to_currency
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true"
         r = requests.get(url, timeout=5)
         data = r.json()
-        ask = data[0]["spreadProfilePrices"][0]["ask"]
-        bid = data[0]["spreadProfilePrices"][0]["bid"]
-        price = (ask + bid) / 2
-        return "💱 *" + pair + "*\n💵 " + "{:.4f}".format(price)
+        btc = data["bitcoin"]["usd"]
+        btc_change = data["bitcoin"]["usd_24h_change"]
+        eth = data["ethereum"]["usd"]
+        eth_change = data["ethereum"]["usd_24h_change"]
+        msg += ("🟢" if btc_change >= 0 else "🔴") + " BTC : $" + "{:,.0f}".format(btc) + " (" + "{:+.1f}".format(btc_change) + "%)\n"
+        msg += ("🟢" if eth_change >= 0 else "🔴") + " ETH : $" + "{:,.0f}".format(eth) + " (" + "{:+.1f}".format(eth_change) + "%)\n"
     except:
-        return None
-
-def get_commodity_price(symbol, label):
+        pass
     try:
-        if symbol == "XAU":
-            url = "https://api.gold-api.com/price/XAU"
-            r = requests.get(url, timeout=5)
-            data = r.json()
-            price = data["price"]
-            return "🥇 *OR (XAU/USD)*\n💵 $" + "{:,.2f}".format(price) + " USD/oz"
-        elif symbol == "XAG":
-            url = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/XAG/USD"
-            r = requests.get(url, timeout=5)
-            data = r.json()
-            ask = data[0]["spreadProfilePrices"][0]["ask"]
-            bid = data[0]["spreadProfilePrices"][0]["bid"]
-            price = (ask + bid) / 2
-            return "🥈 *ARGENT (XAG/USD)*\n💵 $" + "{:,.2f}".format(price) + " USD/oz"
-    except:
-        return None
-
-def get_index_price(yahoo_symbol, label):
-    try:
-        url = "https://query1.finance.yahoo.com/v8/finance/chart/" + yahoo_symbol + "?interval=1d&range=2d"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(url, headers=headers, timeout=5)
+        url = "https://api.gold-api.com/price/XAU"
+        r = requests.get(url, timeout=5)
         data = r.json()
-        meta = data["chart"]["result"][0]["meta"]
-        price = meta["regularMarketPrice"]
-        prev = meta["previousClose"]
-        change = ((price - prev) / prev) * 100
-        emoji = "🟢" if change >= 0 else "🔴"
-        return emoji + " *" + label.upper() + "*\n💵 " + "{:,.2f}".format(price) + "\n📊 24h: " + "{:+.2f}".format(change) + "%"
+        msg += "🥇 OR : $" + "{:,.0f}".format(data["price"]) + "/oz\n"
     except:
-        return None
+        pass
+    try:
+        url = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/EUR/USD"
+        r = requests.get(url, timeout=5)
+        data = r.json()
+        eurusd = (data[0]["spreadProfilePrices"][0]["ask"] + data[0]["spreadProfilePrices"][0]["bid"]) / 2
+        msg += "💱 EUR/USD : " + "{:.4f}".format(eurusd) + "\n"
+    except:
+        pass
+    msg += "\n"
+    articles = get_macro_news()
+    if articles:
+        msg += t("morning_news", lang)
+        for article in articles[:4]:
+            title = article.get("title", "").split(" - ")[0][:80]
+            msg += "• " + title + "\n"
+        msg += "\n"
+        try:
+            news_text = "\n".join([a.get("title", "") for a in articles[:4]])
+            lang_instruction = {
+                "fr": "Réponds en français.",
+                "en": "Reply in English.",
+                "it": "Rispondi in italiano.",
+                "es": "Responde en español."
+            }.get(lang, "Réponds en français.")
+            response = client.messages.create(
+                model="claude-opus-4-5",
+                max_tokens=200,
+                system="Tu es un expert en trading. En 2-3 phrases maximum, dis quel impact ces news peuvent avoir sur BTC, Gold et EUR/USD aujourd'hui. Sois direct et concis. " + lang_instruction,
+                messages=[{"role": "user", "content": "News du jour :\n" + news_text + "\n\nQuel impact sur les marchés ?"}]
+            )
+            msg += t("morning_ai", lang) + response.content[0].text + "\n\n"
+        except:
+            pass
+    msg += "━━━━━━━━━━━━━━━━━━━━\n"
+    msg += t("morning_footer", lang)
+    return msg
+
+def send_morning_briefing_to_all():
+    try:
+        members = get_all_premium()
+        sent = 0
+        for member in members:
+            user_id = member[0]
+            lang = member[2] if member[2] else "fr"
+            try:
+                briefing = get_morning_briefing(lang)
+                bot.send_message(user_id, briefing, parse_mode="Markdown")
+                sent += 1
+                time.sleep(0.1)
+            except:
+                pass
+        print("Morning briefing envoyé à " + str(sent) + " abonnés")
+    except Exception as e:
+        print("Erreur morning briefing : " + str(e))
+
+def morning_briefing_scheduler():
+    already_sent_today = False
+    while True:
+        try:
+            now = datetime.now(TIMEZONE)
+            if now.hour == 8 and now.minute == 30 and not already_sent_today:
+                send_morning_briefing_to_all()
+                already_sent_today = True
+            elif now.hour == 8 and now.minute == 31:
+                already_sent_today = False
+            elif now.hour != 8:
+                already_sent_today = False
+            time.sleep(30)
+        except Exception as e:
+            print("Erreur scheduler : " + str(e))
+            time.sleep(30)
 
 def get_live_prices_context():
     prices = {}
@@ -757,6 +1090,87 @@ def get_live_prices_context():
     except:
         pass
     return prices
+
+CRYPTO_IDS = {
+    "btc": "bitcoin", "bitcoin": "bitcoin", "eth": "ethereum", "ethereum": "ethereum",
+    "bnb": "binancecoin", "sol": "solana", "solana": "solana", "xrp": "ripple",
+    "ripple": "ripple", "ada": "cardano", "doge": "dogecoin", "dogecoin": "dogecoin",
+    "dot": "polkadot", "matic": "matic-network", "ltc": "litecoin",
+    "avax": "avalanche-2", "link": "chainlink",
+}
+
+FOREX_SYMBOLS = {
+    "eurusd": ("EUR", "USD"), "eur/usd": ("EUR", "USD"),
+    "gbpusd": ("GBP", "USD"), "gbp/usd": ("GBP", "USD"),
+    "usdjpy": ("USD", "JPY"), "usd/jpy": ("USD", "JPY"),
+    "usdchf": ("USD", "CHF"), "audusd": ("AUD", "USD"),
+    "usdcad": ("USD", "CAD"), "euro dollar": ("EUR", "USD"),
+}
+
+COMMODITY_KEYWORDS = {
+    "gold": "XAU", "xau": "XAU", "silver": "XAG",
+    "argent": "XAG", "xag": "XAG", "oro": "XAU", "plata": "XAG",
+}
+
+OR_WORDS = ["or", "l'or", "du or", "l or", "xauusd", "xau/usd"]
+
+INDEX_SYMBOLS = {
+    "nasdaq": "^IXIC", "nasdaq100": "^NDX", "sp500": "^GSPC",
+    "s&p500": "^GSPC", "cac40": "^FCHI", "cac 40": "^FCHI", "dax": "^GDAXI",
+}
+
+def get_crypto_price(coin_id, symbol):
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=" + coin_id + "&vs_currencies=usd,eur&include_24hr_change=true"
+        r = requests.get(url, timeout=5)
+        data = r.json()
+        price_usd = data[coin_id]["usd"]
+        price_eur = data[coin_id]["eur"]
+        change = data[coin_id]["usd_24h_change"]
+        emoji = "🟢" if change >= 0 else "🔴"
+        return emoji + " *" + symbol.upper() + "*\n💵 $" + "{:,.2f}".format(price_usd) + " USD\n💶 €" + "{:,.2f}".format(price_eur) + " EUR\n📊 24h: " + "{:+.2f}".format(change) + "%"
+    except:
+        return None
+
+def get_forex_price(from_currency, to_currency):
+    try:
+        url = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/" + from_currency + "/" + to_currency
+        r = requests.get(url, timeout=5)
+        data = r.json()
+        price = (data[0]["spreadProfilePrices"][0]["ask"] + data[0]["spreadProfilePrices"][0]["bid"]) / 2
+        return "💱 *" + from_currency + "/" + to_currency + "*\n💵 " + "{:.4f}".format(price)
+    except:
+        return None
+
+def get_commodity_price(symbol, label):
+    try:
+        if symbol == "XAU":
+            url = "https://api.gold-api.com/price/XAU"
+            r = requests.get(url, timeout=5)
+            data = r.json()
+            return "🥇 *OR (XAU/USD)*\n💵 $" + "{:,.2f}".format(data["price"]) + " USD/oz"
+        elif symbol == "XAG":
+            url = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/XAG/USD"
+            r = requests.get(url, timeout=5)
+            data = r.json()
+            price = (data[0]["spreadProfilePrices"][0]["ask"] + data[0]["spreadProfilePrices"][0]["bid"]) / 2
+            return "🥈 *ARGENT (XAG/USD)*\n💵 $" + "{:,.2f}".format(price) + " USD/oz"
+    except:
+        return None
+
+def get_index_price(yahoo_symbol, label):
+    try:
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/" + yahoo_symbol + "?interval=1d&range=2d"
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+        data = r.json()
+        meta = data["chart"]["result"][0]["meta"]
+        price = meta["regularMarketPrice"]
+        prev = meta["previousClose"]
+        change = ((price - prev) / prev) * 100
+        emoji = "🟢" if change >= 0 else "🔴"
+        return emoji + " *" + label.upper() + "*\n💵 " + "{:,.2f}".format(price) + "\n📊 24h: " + "{:+.2f}".format(change) + "%"
+    except:
+        return None
 
 def detect_asset(text):
     text_lower = text.lower()
@@ -795,24 +1209,19 @@ def create_checkout_session(user_id, price_id, plan_name):
     except:
         return None
 
-def get_blocked_message(user_id):
+def get_blocked_message(user_id, lang="fr"):
     mensuel_url = create_checkout_session(user_id, STRIPE_PRICE_MENSUEL, "mensuel")
     trimestriel_url = create_checkout_session(user_id, STRIPE_PRICE_TRIMESTRIEL, "trimestriel")
     annuel_url = create_checkout_session(user_id, STRIPE_PRICE_ANNUEL, "annuel")
-    msg = "🚫 *Vous avez utilisé vos 5 questions gratuites.*\n\n"
-    msg += "Pour continuer, choisissez votre abonnement :\n\n"
-    msg += "⭐ *Inclus dans chaque abonnement :*\n"
-    msg += "✅ Questions illimitées 24h/24\n"
-    msg += "✅ Signaux automatiques avec calcul de lots\n"
-    msg += "✅ Morning briefing à 8h30 tous les matins\n"
-    msg += "✅ Live exclusif chaque semaine réservé aux abonnés\n\n"
+    msg = t("subscription_blocked", lang)
+    msg += t("subscription_included", lang)
     if mensuel_url:
         msg += "📅 [Mensuel — 29,99€/mois](" + mensuel_url + ")\n"
     if trimestriel_url:
         msg += "📆 [Trimestriel — 74,99€/3 mois](" + trimestriel_url + ")\n"
     if annuel_url:
         msg += "🗓️ [Annuel — 239,99€/an](" + annuel_url + ")\n"
-    msg += "\n✅ Paiement sécurisé par Stripe"
+    msg += t("subscription_secure", lang)
     return msg
 
 def download_image_as_base64(file_id):
@@ -824,20 +1233,27 @@ def download_image_as_base64(file_id):
     except:
         return None
 
-def send_broker_keyboard(user_id):
+def send_lang_keyboard(user_id):
+    keyboard = telebot.types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True, one_time_keyboard=True)
+    keyboard.add(
+        telebot.types.KeyboardButton("🇫🇷 Français"),
+        telebot.types.KeyboardButton("🇬🇧 English"),
+        telebot.types.KeyboardButton("🇮🇹 Italiano"),
+        telebot.types.KeyboardButton("🇪🇸 Español"),
+    )
+    bot.send_message(user_id, t("choose_lang", "fr"), parse_mode="Markdown", reply_markup=keyboard)
+
+def send_broker_keyboard(user_id, lang="fr"):
     keyboard = telebot.types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True, one_time_keyboard=True)
     keyboard.add(*[telebot.types.KeyboardButton(b) for b in BROKERS])
-    bot.send_message(user_id, "🏦 *Quel broker utilisez-vous ?*\n\n_Sélectionnez dans la liste :_", parse_mode="Markdown", reply_markup=keyboard)
+    bot.send_message(user_id, t("choose_broker", lang), parse_mode="Markdown", reply_markup=keyboard)
 
-def send_risk_keyboard(user_id):
+def send_risk_keyboard(user_id, lang="fr"):
     keyboard = telebot.types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True, one_time_keyboard=True)
-    keyboard.add(*[telebot.types.KeyboardButton(r) for r in RISK_OPTIONS])
-    bot.send_message(
-        user_id,
-        "📊 *Quel % de risque par trade ?*\n\n• 1% = conservateur\n• 2.5% = modéré\n• 5% = agressif\n• 10% = très agressif",
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
+    for r in RISK_OPTIONS_LABELS:
+        keyboard.add(telebot.types.KeyboardButton(r))
+    keyboard.add(telebot.types.KeyboardButton(t("custom_risk", lang)))
+    bot.send_message(user_id, t("choose_risk", lang), parse_mode="Markdown", reply_markup=keyboard)
 
 @app.route("/webhook", methods=["POST"])
 def stripe_webhook():
@@ -856,15 +1272,9 @@ def stripe_webhook():
         subscription_id = session.get("subscription")
         if user_id:
             set_premium(int(user_id), True, plan, customer_id, subscription_id)
+            lang = get_lang(int(user_id))
             try:
-                bot.send_message(int(user_id),
-                    "🎉 *Paiement confirmé !*\n\nBienvenue dans AutoTrade Premium ! 🚀\n\n"
-                    "✅ Questions illimitées 24h/24\n"
-                    "✅ Signaux automatiques avec calcul de lots\n"
-                    "✅ Morning briefing à 8h30 tous les matins\n"
-                    "✅ Live exclusif chaque semaine\n\n"
-                    "📖 Tapez /aide pour voir toutes les commandes !",
-                    parse_mode="Markdown")
+                bot.send_message(int(user_id), t("payment_confirmed", lang), parse_mode="Markdown")
             except:
                 pass
 
@@ -880,10 +1290,11 @@ def stripe_webhook():
             conn.close()
             if row:
                 user_id = row[0]
+                lang = get_lang(user_id)
                 set_premium(user_id, False)
                 clear_history(user_id)
                 try:
-                    bot.send_message(user_id, "❌ Votre abonnement AutoTrade a été annulé.\n\nVous pouvez vous réabonner avec /abonnement.", parse_mode="Markdown")
+                    bot.send_message(user_id, t("subscription_cancelled", lang), parse_mode="Markdown")
                 except:
                     pass
         except:
@@ -906,15 +1317,16 @@ def handle_channel_post(message):
     members = get_all_premium()
     for member in members:
         user_id = member[0]
+        lang = member[2] if member[2] else "fr"
         user = get_user(user_id)
         save_pending_signal(user_id, message.text)
         try:
             capital_info = ""
             if user and user.get("capital"):
-                capital_info = "\n_Dernier capital enregistré : " + str(user["capital"]) + "€_"
+                capital_info = t("last_capital", lang, capital=user["capital"])
             bot.send_message(
                 user_id,
-                "📡 *Nouveau signal !*\n\n" + message.text + "\n\n💰 *Quel est votre capital actuel ?*" + capital_info + "\n_(ex: 2000)_",
+                t("new_signal", lang, signal=message.text, capital_info=capital_info),
                 parse_mode="Markdown"
             )
         except:
@@ -924,115 +1336,87 @@ def handle_channel_post(message):
 def send_welcome(message):
     user_id = message.from_user.id
     clear_history(user_id)
-    set_onboarding_step(user_id, 1)
-    bot.send_message(user_id, """👋 *Bienvenue sur AutoTrade Bot !*
-
-Je suis votre assistant trading personnel, disponible 24h/24 et 7j/7.
-
-💹 *Ce que je peux faire pour vous :*
-
-✅ Prix en temps réel — Crypto, Forex, Or, Indices
-✅ Signaux automatiques avec calcul de lots
-✅ Morning briefing à 8h30 tous les matins
-✅ Analyse de vos graphiques TradingView
-✅ Niveaux clés — Support, Résistance, Objectifs
-✅ Gestion du risque personnalisée
-✅ Live exclusif chaque semaine réservé aux abonnés
-
-📖 Tapez /aide pour voir toutes les commandes
-
-_Avant de commencer, j'ai besoin de 3 informations rapides_ 👇""", parse_mode="Markdown")
-    time.sleep(1)
-    send_broker_keyboard(user_id)
+    set_field(user_id, "onboarding_step", 0)
+    send_lang_keyboard(user_id)
 
 @bot.message_handler(commands=["morning"])
 def send_morning_command(message):
     user_id = message.from_user.id
+    lang = get_lang(user_id)
     if not is_premium(user_id):
-        bot.reply_to(message, "⭐ Cette fonctionnalité est réservée aux membres Premium.\n\nAbonnez-vous avec /abonnement 🚀")
+        bot.reply_to(message, t("morning_premium_only", lang))
         return
-    bot.reply_to(message, "⏳ Génération du briefing en cours...")
-    briefing = get_morning_briefing()
+    bot.reply_to(message, t("morning_generating", lang))
+    briefing = get_morning_briefing(lang)
     bot.send_message(user_id, briefing, parse_mode="Markdown")
 
-@bot.message_handler(commands=["profil"])
+@bot.message_handler(commands=["profil", "profile", "profilo", "perfil"])
 def show_profil(message):
     user_id = message.from_user.id
+    lang = get_lang(user_id)
     user = get_user(user_id)
     if not user:
-        bot.reply_to(message, "Aucun profil trouvé. Tapez /start pour commencer.")
+        bot.reply_to(message, t("not_found", lang))
         return
-    broker = user.get("broker") or "Non renseigné"
+    broker = user.get("broker") or "—"
     capital = user.get("capital")
     capital_initial = user.get("capital_initial")
     risk = user.get("risk_percent") or 1.0
-    capital_str = str(capital) + "€" if capital else "Non renseigné"
-    capital_initial_str = str(capital_initial) + "€" if capital_initial else "Non renseigné"
+    capital_str = str(capital) + "€" if capital else "—"
+    capital_initial_str = str(capital_initial) + "€" if capital_initial else "—"
     risque_euros = round(capital * risk / 100, 2) if capital else 0
-    premium = "✅ Premium" if user.get("is_premium") else "❌ Gratuit"
-    variation_str = ""
+    status = t("premium_status", lang) if user.get("is_premium") else t("free_status", lang)
+    perf = ""
     if capital and capital_initial and capital_initial > 0:
         variation = ((capital - capital_initial) / capital_initial) * 100
-        variation_str = "\n📊 Performance : *" + "{:+.1f}".format(variation) + "%*"
-    msg = "👤 *Votre profil :*\n\n"
-    msg += "🏦 Broker : *" + broker + "*\n"
-    msg += "💰 Capital initial : *" + capital_initial_str + "*\n"
-    msg += "💰 Capital actuel : *" + capital_str + "*"
-    msg += variation_str + "\n"
-    msg += "📊 Risque : *" + str(risk) + "%* (" + str(risque_euros) + "€ par trade)\n"
-    msg += "⭐ Statut : *" + premium + "*\n\n"
-    msg += "_Modifier : /broker, /capital ou /risque_"
+        perf = "\n📊 Performance : *" + "{:+.1f}".format(variation) + "%*"
+    msg = t("profil", lang, broker=broker, capital_initial=capital_initial_str,
+            capital=capital_str, perf=perf, risk=risk, risk_eur=risque_euros, status=status)
     bot.reply_to(message, msg, parse_mode="Markdown")
 
-@bot.message_handler(commands=["aide"])
+@bot.message_handler(commands=["aide", "help", "aiuto", "ayuda"])
 def send_aide(message):
-    msg = """📖 *Commandes disponibles :*
+    lang = get_lang(message.from_user.id)
+    bot.reply_to(message, t("aide", lang), parse_mode="Markdown")
 
-💹 *Trading*
-/morning — Briefing des marchés du jour ⭐
-/profil — Voir votre profil et performance
-
-⚙️ *Paramètres*
-/broker — Changer de broker
-/capital — Mettre à jour votre capital
-/risque — Modifier votre % de risque
-/nouveau — Nouvelle conversation
-
-💳 *Abonnement*
-/abonnement — Voir les offres Premium
-
-_Posez vos questions en texte ou envoyez un screenshot de graphique !_"""
-    bot.reply_to(message, msg, parse_mode="Markdown")
+@bot.message_handler(commands=["langue", "language", "lingua", "idioma"])
+def change_lang(message):
+    set_field(message.from_user.id, "onboarding_step", 0)
+    send_lang_keyboard(message.from_user.id)
 
 @bot.message_handler(commands=["broker"])
 def change_broker(message):
-    set_onboarding_step(message.from_user.id, 1)
-    send_broker_keyboard(message.from_user.id)
+    lang = get_lang(message.from_user.id)
+    set_field(message.from_user.id, "onboarding_step", 2)
+    send_broker_keyboard(message.from_user.id, lang)
 
-@bot.message_handler(commands=["capital"])
+@bot.message_handler(commands=["capital", "capitale"])
 def change_capital(message):
-    set_onboarding_step(message.from_user.id, 2)
+    lang = get_lang(message.from_user.id)
+    set_field(message.from_user.id, "onboarding_step", 3)
     keyboard = telebot.types.ReplyKeyboardRemove()
-    bot.send_message(message.from_user.id, "💰 *Quel est votre capital actuel ?*\n_(ex: 2000 pour 2000€)_", parse_mode="Markdown", reply_markup=keyboard)
+    bot.send_message(message.from_user.id, t("change_capital", lang), parse_mode="Markdown", reply_markup=keyboard)
 
-@bot.message_handler(commands=["risque"])
+@bot.message_handler(commands=["risque", "risk", "rischio", "riesgo"])
 def change_risk(message):
-    set_onboarding_step(message.from_user.id, 3)
-    send_risk_keyboard(message.from_user.id)
+    lang = get_lang(message.from_user.id)
+    set_field(message.from_user.id, "onboarding_step", 4)
+    send_risk_keyboard(message.from_user.id, lang)
 
-@bot.message_handler(commands=["abonnement"])
+@bot.message_handler(commands=["abonnement", "subscription", "abbonamento", "suscripcion"])
 def send_subscription(message):
     user_id = message.from_user.id
+    lang = get_lang(user_id)
     if is_premium(user_id):
-        bot.reply_to(message, "✅ Vous êtes déjà membre Premium ! Profitez de vos avantages exclusifs. 🚀")
+        bot.reply_to(message, t("already_premium", lang))
         return
-    msg = get_blocked_message(user_id)
-    bot.reply_to(message, msg, parse_mode="Markdown", disable_web_page_preview=True)
+    bot.reply_to(message, get_blocked_message(user_id, lang), parse_mode="Markdown", disable_web_page_preview=True)
 
-@bot.message_handler(commands=["nouveau"])
+@bot.message_handler(commands=["nouveau", "new", "nuovo", "nuevo"])
 def new_conversation(message):
+    lang = get_lang(message.from_user.id)
     clear_history(message.from_user.id)
-    bot.reply_to(message, "🔄 Nouvelle conversation démarrée !")
+    bot.reply_to(message, t("new_conversation", lang))
 
 @bot.message_handler(commands=["premium"])
 def activate_premium(message):
@@ -1046,14 +1430,8 @@ def activate_premium(message):
         set_premium(target_id, True, "test")
         bot.reply_to(message, "✅ Utilisateur " + str(target_id) + " activé en Premium !")
         try:
-            bot.send_message(target_id,
-                "🎉 *Accès Premium activé !*\n\n"
-                "✅ Questions illimitées 24h/24\n"
-                "✅ Signaux automatiques avec calcul de lots\n"
-                "✅ Morning briefing à 8h30 tous les matins\n"
-                "✅ Live exclusif chaque semaine\n\n"
-                "📖 Tapez /aide pour voir toutes les commandes ! 🚀",
-                parse_mode="Markdown")
+            lang = get_lang(target_id)
+            bot.send_message(target_id, t("premium_activated", lang), parse_mode="Markdown")
         except:
             pass
     else:
@@ -1062,18 +1440,18 @@ def activate_premium(message):
 
 @bot.message_handler(commands=["revoquer"])
 def revoke_premium(message):
-    user_id = message.from_user.id
-    if user_id != ADMIN_ID:
+    if message.from_user.id != ADMIN_ID:
         bot.reply_to(message, "⛔ Commande réservée à l'administrateur.")
         return
     args = message.text.split()
     if len(args) > 1:
         target_id = int(args[1])
+        lang = get_lang(target_id)
         set_premium(target_id, False)
         clear_history(target_id)
         bot.reply_to(message, "✅ Accès Premium révoqué pour " + str(target_id))
         try:
-            bot.send_message(target_id, "❌ Votre accès AutoTrade a été révoqué.\n\nVous pouvez vous réabonner avec /abonnement.", parse_mode="Markdown")
+            bot.send_message(target_id, t("subscription_cancelled", lang), parse_mode="Markdown")
         except:
             pass
     else:
@@ -1081,8 +1459,7 @@ def revoke_premium(message):
 
 @bot.message_handler(commands=["membres"])
 def list_members(message):
-    user_id = message.from_user.id
-    if user_id != ADMIN_ID:
+    if message.from_user.id != ADMIN_ID:
         bot.reply_to(message, "⛔ Commande réservée à l'administrateur.")
         return
     members = get_all_premium()
@@ -1096,11 +1473,12 @@ def list_members(message):
         capital = str(user.get("capital", "?")) + "€" if user and user.get("capital") else "?"
         capital_initial = user.get("capital_initial") if user else None
         risk = str(user.get("risk_percent", "?")) + "%" if user and user.get("risk_percent") else "?"
+        lang = user.get("langue", "fr") if user else "fr"
         perf = ""
         if user and user.get("capital") and capital_initial and capital_initial > 0:
             variation = ((user["capital"] - capital_initial) / capital_initial) * 100
             perf = " (" + "{:+.0f}".format(variation) + "%)"
-        msg += "• " + str(m[0]) + " — " + broker + " — " + capital + perf + " — " + risk + "\n"
+        msg += "• " + str(m[0]) + " [" + lang.upper() + "] — " + broker + " — " + capital + perf + " — " + risk + "\n"
     bot.reply_to(message, msg, parse_mode="Markdown")
 
 @bot.message_handler(commands=["stats"])
@@ -1120,7 +1498,16 @@ def show_stats(message):
         msg += "🆓 Gratuits : *" + str(total_free) + "*\n"
         if total > 0:
             taux = round(total_premium / total * 100, 1)
-            msg += "📈 Taux de conversion : *" + str(taux) + "%*"
+            msg += "📈 Taux de conversion : *" + str(taux) + "%*\n\n"
+        # Stats par langue
+        lang_count = {}
+        for m in get_all_premium():
+            l = m[2] if m[2] else "fr"
+            lang_count[l] = lang_count.get(l, 0) + 1
+        if lang_count:
+            msg += "🌍 *Premium par langue :*\n"
+            for l, count in lang_count.items():
+                msg += "• " + l.upper() + " : " + str(count) + "\n"
         bot.reply_to(message, msg, parse_mode="Markdown")
     except Exception as e:
         bot.reply_to(message, "Erreur : " + str(e))
@@ -1132,12 +1519,9 @@ def broadcast_message(message):
         return
     text = message.text.replace("/broadcast", "").strip()
     if not text:
-        bot.reply_to(message, "Usage : /broadcast Votre message\n\nExemple :\n/broadcast 🎯 Zoom ce soir 20h — Lien : https://zoom.us/xxx\n\n_Envoi aux membres Premium uniquement._")
+        bot.reply_to(message, "Usage : /broadcast Votre message\n_Envoi aux membres Premium uniquement._")
         return
     members = get_all_premium()
-    if not members:
-        bot.reply_to(message, "Aucun membre Premium pour le moment.")
-        return
     sent = 0
     failed = 0
     for member in members:
@@ -1156,12 +1540,9 @@ def upsell_message(message):
         return
     text = message.text.replace("/upsell", "").strip()
     if not text:
-        bot.reply_to(message, "Usage : /upsell Votre message\n\nExemple :\n/upsell 🚀 Accédez aux signaux en temps réel et au morning briefing ! /abonnement\n\n_Envoi à TOUS les utilisateurs._")
+        bot.reply_to(message, "Usage : /upsell Votre message\n_Envoi à TOUS les utilisateurs._")
         return
     users = get_all_users()
-    if not users:
-        bot.reply_to(message, "Aucun utilisateur pour le moment.")
-        return
     sent_free = 0
     sent_premium = 0
     failed = 0
@@ -1175,11 +1556,7 @@ def upsell_message(message):
             time.sleep(0.1)
         except:
             failed += 1
-    bot.reply_to(
-        message,
-        "✅ Envoyé à *" + str(sent_free + sent_premium) + "* utilisateurs\n📊 Gratuits : *" + str(sent_free) + "* | Premium : *" + str(sent_premium) + "*\n❌ Échec : " + str(failed),
-        parse_mode="Markdown"
-    )
+    bot.reply_to(message, "✅ Envoyé à *" + str(sent_free + sent_premium) + "* utilisateurs\n📊 Gratuits : *" + str(sent_free) + "* | Premium : *" + str(sent_premium) + "*\n❌ Échec : " + str(failed), parse_mode="Markdown")
 
 @bot.message_handler(commands=["briefing"])
 def force_briefing_admin(message):
@@ -1193,21 +1570,21 @@ def force_briefing_admin(message):
 @bot.message_handler(content_types=["photo"])
 def handle_photo(message):
     user_id = message.from_user.id
+    lang = get_lang(user_id)
     count = get_question_count(user_id)
     if not is_premium(user_id) and count >= MAX_FREE_QUESTIONS:
-        msg = get_blocked_message(user_id)
-        bot.reply_to(message, msg, parse_mode="Markdown", disable_web_page_preview=True)
+        bot.reply_to(message, get_blocked_message(user_id, lang), parse_mode="Markdown", disable_web_page_preview=True)
         return
     if not is_premium(user_id):
         increment_question(user_id)
         count += 1
     remaining = MAX_FREE_QUESTIONS - count
-    bot.reply_to(message, "🔍 Analyse du graphique en cours...")
+    bot.reply_to(message, t("analyzing", lang))
     try:
         file_id = message.photo[-1].file_id
         image_base64 = download_image_as_base64(file_id)
         if not image_base64:
-            bot.reply_to(message, "Impossible de lire l'image.")
+            bot.reply_to(message, t("image_error", lang))
             return
         live_prices = get_live_prices_context()
         prices_context = "PRIX EN TEMPS REEL ACTUELS :\n"
@@ -1220,9 +1597,10 @@ def handle_photo(message):
         if user and user.get("capital"):
             user_context += "Capital : " + str(user["capital"]) + "€\n"
         if user and user.get("risk_percent"):
-            user_context += "Risque par trade : " + str(user["risk_percent"]) + "%\n"
-        caption = message.caption or "Analyse ce screenshot de trading. Sois concis et direct. Donne les infos cles : actif, direction, niveaux importants. Si capital mentionne, calcule le lot (min 0.01). IMPORTANT: Les chiffres de vues/likes/reactions ne sont pas des prix ni des dates."
+            user_context += "Risk : " + str(user["risk_percent"]) + "%\n"
+        caption = message.caption or "Analyze this trading screenshot. Be concise. Give key info: asset, direction, important levels. Min lot 0.01. Numbers from views/likes are NOT prices."
         full_prompt = prices_context + "\n" + user_context + "\n" + caption
+        lang_instruction = {"fr": "Réponds en français.", "en": "Reply in English.", "it": "Rispondi in italiano.", "es": "Responde en español."}.get(lang, "Réponds en français.")
         history = get_history(user_id)
         messages_with_history = history + [
             {"role": "user", "content": [
@@ -1233,16 +1611,13 @@ def handle_photo(message):
         response = client.messages.create(
             model="claude-opus-4-5",
             max_tokens=600,
-            system="Tu es un expert en trading concis. Reponds UNIQUEMENT a ce qui est demande. Utilise TOUJOURS les prix en temps reel fournis. Pour les calculs de lots, minimum 0.01 lot. Tiens compte du broker, capital et % risque si fournis. Les chiffres de vues/likes ne sont pas des prix ni des dates. Reponds en francais. Tu te souviens du contexte des echanges precedents.",
+            system="Tu es un expert en trading concis. Utilise TOUJOURS les prix en temps reel fournis. Minimum 0.01 lot. Les chiffres de vues/likes ne sont pas des prix. " + lang_instruction,
             messages=messages_with_history,
         )
         answer = response.content[0].text
         save_message(user_id, "user", "[Screenshot] " + caption)
         save_message(user_id, "assistant", answer)
-        if is_premium(user_id):
-            footer = "\n\n_✨ Membre Premium_"
-        else:
-            footer = "\n\n_" + str(remaining) + " question(s) gratuite(s) restante(s)_"
+        footer = t("footer_premium", lang) if is_premium(user_id) else t("footer_free", lang, count=remaining)
         bot.reply_to(message, answer + footer, parse_mode="Markdown")
     except Exception as e:
         bot.reply_to(message, "Erreur : " + str(e))
@@ -1252,80 +1627,110 @@ def handle_message(message):
     user_id = message.from_user.id
     user = get_user(user_id)
     onboarding_step = user.get("onboarding_step", 0) if user else 0
+    lang = user.get("langue", "fr") if user else "fr"
 
+    # Étape 0 : choix de la langue
+    if onboarding_step == 0 and not (user and user.get("langue") and onboarding_step > 0):
+        lang_map = {
+            "🇫🇷 Français": "fr", "🇬🇧 English": "en",
+            "🇮🇹 Italiano": "it", "🇪🇸 Español": "es"
+        }
+        chosen = lang_map.get(message.text.strip())
+        if chosen:
+            set_field(user_id, "langue", chosen)
+            set_field(user_id, "onboarding_step", 1)
+            lang = chosen
+            keyboard = telebot.types.ReplyKeyboardRemove()
+            bot.send_message(user_id, t("lang_saved", lang), parse_mode="Markdown", reply_markup=keyboard)
+            time.sleep(0.5)
+            bot.send_message(user_id, t("welcome", lang), parse_mode="Markdown")
+            time.sleep(1)
+            send_broker_keyboard(user_id, lang)
+        else:
+            send_lang_keyboard(user_id)
+        return
+
+    # Étape 1 : broker
     if onboarding_step == 1:
         broker = message.text.strip()
         if broker not in BROKERS:
-            send_broker_keyboard(user_id)
+            bot.send_message(user_id, t("invalid_broker", lang))
+            send_broker_keyboard(user_id, lang)
             return
-        set_broker(user_id, broker)
-        set_onboarding_step(user_id, 2)
+        set_field(user_id, "broker", broker)
+        set_field(user_id, "onboarding_step", 3)
         keyboard = telebot.types.ReplyKeyboardRemove()
-        bot.send_message(user_id, "✅ Broker : *" + broker + "*\n\n💰 *Quel est votre capital de trading ?*\n_(ex: 2000 pour 2000€)_", parse_mode="Markdown", reply_markup=keyboard)
+        bot.send_message(user_id, t("broker_saved", lang, broker=broker), parse_mode="Markdown", reply_markup=keyboard)
         return
 
+    # Étape 2 : broker (depuis /broker)
     if onboarding_step == 2:
+        broker = message.text.strip()
+        if broker not in BROKERS:
+            send_broker_keyboard(user_id, lang)
+            return
+        set_field(user_id, "broker", broker)
+        set_field(user_id, "onboarding_step", 0)
+        keyboard = telebot.types.ReplyKeyboardRemove()
+        bot.send_message(user_id, "✅ Broker mis à jour : *" + broker + "*", parse_mode="Markdown", reply_markup=keyboard)
+        return
+
+    # Étape 3 : capital
+    if onboarding_step == 3:
         try:
             capital = float(message.text.strip().replace("€", "").replace(",", ".").replace(" ", ""))
             if capital <= 0:
                 raise ValueError
             set_capital(user_id, capital, is_initial=True)
-            set_onboarding_step(user_id, 3)
+            set_field(user_id, "onboarding_step", 4)
             time.sleep(0.5)
-            send_risk_keyboard(user_id)
+            send_risk_keyboard(user_id, lang)
         except:
-            bot.send_message(user_id, "⚠️ Veuillez entrer un montant valide (ex: 2000)")
+            bot.send_message(user_id, t("invalid_capital", lang))
         return
 
-    if onboarding_step == 3:
+    # Étape 4 : risque
+    if onboarding_step == 4:
         text = message.text.strip()
-        if text == "Personnalisé":
-            set_onboarding_step(user_id, 4)
+        if text == t("custom_risk", lang):
+            set_field(user_id, "onboarding_step", 5)
             keyboard = telebot.types.ReplyKeyboardRemove()
-            bot.send_message(user_id, "✏️ *Entrez votre % de risque personnalisé*\n_(ex: 3 pour 3%)_", parse_mode="Markdown", reply_markup=keyboard)
+            bot.send_message(user_id, t("enter_custom_risk", lang), parse_mode="Markdown", reply_markup=keyboard)
             return
         try:
             risk = float(text.replace("%", "").replace(",", "."))
             if risk <= 0 or risk > 100:
                 raise ValueError
-            set_risk(user_id, risk)
-            set_onboarding_step(user_id, 0)
+            set_field(user_id, "risk_percent", risk)
+            set_field(user_id, "onboarding_step", 0)
             user = get_user(user_id)
             broker = user.get("broker", "") if user else ""
             capital = user.get("capital", 0) if user else 0
             risque_euros = round(capital * risk / 100, 2)
             keyboard = telebot.types.ReplyKeyboardRemove()
-            bot.send_message(
-                user_id,
-                "✅ *Profil configuré !*\n\n🏦 Broker : *" + broker + "*\n💰 Capital : *" + str(capital) + "€*\n📊 Risque : *" + str(risk) + "%* (" + str(risque_euros) + "€ par trade)\n\n_Modifier : /broker, /capital ou /risque_\n\n📖 Tapez /aide pour voir toutes les commandes\n🎁 Vous avez *5 questions gratuites* — Postez votre question ou screenshot ! 📈",
-                parse_mode="Markdown",
-                reply_markup=keyboard
-            )
+            bot.send_message(user_id, t("profile_complete", lang, broker=broker, capital=capital, risk=risk, risk_eur=risque_euros), parse_mode="Markdown", reply_markup=keyboard)
         except:
-            send_risk_keyboard(user_id)
+            send_risk_keyboard(user_id, lang)
         return
 
-    if onboarding_step == 4:
+    # Étape 5 : risque personnalisé
+    if onboarding_step == 5:
         try:
             risk = float(message.text.strip().replace("%", "").replace(",", "."))
             if risk <= 0 or risk > 100:
                 raise ValueError
-            set_risk(user_id, risk)
-            set_onboarding_step(user_id, 0)
+            set_field(user_id, "risk_percent", risk)
+            set_field(user_id, "onboarding_step", 0)
             user = get_user(user_id)
             broker = user.get("broker", "") if user else ""
             capital = user.get("capital", 0) if user else 0
             risque_euros = round(capital * risk / 100, 2)
-            bot.send_message(
-                user_id,
-                "✅ *Profil configuré !*\n\n🏦 Broker : *" + broker + "*\n💰 Capital : *" + str(capital) + "€*\n📊 Risque : *" + str(risk) + "%* (" + str(risque_euros) + "€ par trade)\n\n_Modifier : /broker, /capital ou /risque_\n\n📖 Tapez /aide pour voir toutes les commandes\n🎁 Vous avez *5 questions gratuites* — Postez votre question ou screenshot ! 📈",
-                parse_mode="Markdown"
-            )
+            bot.send_message(user_id, t("profile_complete", lang, broker=broker, capital=capital, risk=risk, risk_eur=risque_euros), parse_mode="Markdown")
         except:
-            bot.send_message(user_id, "⚠️ Entrez un nombre valide (ex: 3)")
+            bot.send_message(user_id, t("invalid_risk", lang))
         return
 
-    # Signal en attente — extraction intelligente du capital
+    # Signal en attente
     pending = get_pending_signal(user_id)
     if pending:
         try:
@@ -1341,10 +1746,10 @@ def handle_message(message):
                     lots = calculate_lots(capital_input, risk, signal)
                     delete_pending_signal(user_id)
                     if lots:
-                        result = format_signal_with_lots(signal, lots, capital_input, risk, broker)
+                        result = format_signal_with_lots(signal, lots, capital_input, risk, lang, broker)
                         bot.reply_to(message, result, parse_mode="Markdown")
                     else:
-                        bot.reply_to(message, "⚠️ Impossible de calculer les lots pour ce signal.")
+                        bot.reply_to(message, t("signal_error", lang))
                     return
             else:
                 delete_pending_signal(user_id)
@@ -1353,8 +1758,7 @@ def handle_message(message):
 
     count = get_question_count(user_id)
     if not is_premium(user_id) and count >= MAX_FREE_QUESTIONS:
-        msg = get_blocked_message(user_id)
-        bot.reply_to(message, msg, parse_mode="Markdown", disable_web_page_preview=True)
+        bot.reply_to(message, get_blocked_message(user_id, lang), parse_mode="Markdown", disable_web_page_preview=True)
         return
     if not is_premium(user_id):
         increment_question(user_id)
@@ -1376,13 +1780,10 @@ def handle_message(message):
         else:
             price_data = None
         if price_data:
-            price_info = "📡 *Prix en temps réel :*\n" + price_data + "\n\n"
+            price_info = "📡 *" + {"fr": "Prix en temps réel", "en": "Real-time price", "it": "Prezzo in tempo reale", "es": "Precio en tiempo real"}.get(lang, "Prix") + " :*\n" + price_data + "\n\n"
 
-    if price_info and is_price_only_request(message.text):
-        if is_premium(user_id):
-            footer = "\n\n_✨ Membre Premium_"
-        else:
-            footer = "\n\n_" + str(remaining) + " question(s) gratuite(s) restante(s)_"
+    if price_info and is_price_only_request(message.text, lang):
+        footer = t("footer_premium", lang) if is_premium(user_id) else t("footer_free", lang, count=remaining)
         bot.reply_to(message, price_info + footer, parse_mode="Markdown")
         return
 
@@ -1391,15 +1792,17 @@ def handle_message(message):
         if user and user.get("broker"):
             user_context += "Broker : " + user["broker"] + ". "
         if user and user.get("capital"):
-            user_context += "Capital actuel : " + str(user["capital"]) + "€. "
+            user_context += "Capital : " + str(user["capital"]) + "€. "
         if user and user.get("risk_percent"):
-            user_context += "Risque par trade : " + str(user["risk_percent"]) + "%. "
+            user_context += "Risk : " + str(user["risk_percent"]) + "%. "
 
         user_content = message.text
         if price_info:
-            user_content = message.text + "\n\n[DONNEES EN TEMPS REEL: " + price_info + "]"
+            user_content = message.text + "\n\n[REAL-TIME DATA: " + price_info + "]"
         if user_context:
-            user_content = "[PROFIL: " + user_context + "]\n\n" + user_content
+            user_content = "[PROFILE: " + user_context + "]\n\n" + user_content
+
+        lang_instruction = {"fr": "Réponds en français.", "en": "Reply in English.", "it": "Rispondi in italiano.", "es": "Responde en español."}.get(lang, "Réponds en français.")
 
         history = get_history(user_id)
         messages_with_history = history + [{"role": "user", "content": user_content}]
@@ -1407,19 +1810,14 @@ def handle_message(message):
         response = client.messages.create(
             model="claude-opus-4-5",
             max_tokens=500,
-            system="Tu es un assistant trading expert et concis. Reponds UNIQUEMENT a ce qui est demande. Si on te demande un cours, utilise UNIQUEMENT le prix fourni. Pour les calculs de lots, minimum 0.01 lot. Tiens compte du broker, capital et % risque si fournis. Reponds en francais. Tu te souviens du contexte des echanges precedents et tu gardes une conversation coherente et professionnelle.",
+            system="Tu es un assistant trading expert et concis. Utilise UNIQUEMENT le prix fourni. Minimum 0.01 lot. Tu te souviens du contexte des échanges précédents. " + lang_instruction,
             messages=messages_with_history,
         )
         answer = response.content[0].text
         save_message(user_id, "user", user_content)
         save_message(user_id, "assistant", answer)
-
-        if is_premium(user_id):
-            footer = "\n\n_✨ Membre Premium_"
-        else:
-            footer = "\n\n_" + str(remaining) + " question(s) gratuite(s) restante(s)_"
-        full_response = price_info + answer + footer
-        bot.reply_to(message, full_response, parse_mode="Markdown")
+        footer = t("footer_premium", lang) if is_premium(user_id) else t("footer_free", lang, count=remaining)
+        bot.reply_to(message, price_info + answer + footer, parse_mode="Markdown")
 
     except Exception as e:
         bot.reply_to(message, "Erreur : " + str(e))
