@@ -146,10 +146,10 @@ _Antes de empezar, necesito 3 datos rápidos_ 👇""",
     },
 
     "lang_saved": {
-        "fr": "✅ Langue définie : Français",
-        "en": "✅ Language set: English",
-        "it": "✅ Lingua impostata: Italiano",
-        "es": "✅ Idioma establecido: Español",
+        "fr": "✅ Langue définie : Français 🇫🇷",
+        "en": "✅ Language set: English 🇬🇧",
+        "it": "✅ Lingua impostata: Italiano 🇮🇹",
+        "es": "✅ Idioma establecido: Español 🇪🇸",
     },
 
     "choose_broker": {
@@ -278,19 +278,8 @@ _Antes de empezar, necesito 3 datos rápidos_ 👇""",
         "es": "👤 *Tu perfil:*\n\n🏦 Broker: *{broker}*\n💰 Capital inicial: *{capital_initial}*\n💰 Capital actual: *{capital}*{perf}\n📊 Riesgo: *{risk}%* ({risk_eur}€ por operación)\n⭐ Estado: *{status}*\n\n_Editar: /broker, /capital o /riesgo_",
     },
 
-    "premium_status": {
-        "fr": "✅ Premium",
-        "en": "✅ Premium",
-        "it": "✅ Premium",
-        "es": "✅ Premium",
-    },
-
-    "free_status": {
-        "fr": "❌ Gratuit",
-        "en": "❌ Free",
-        "it": "❌ Gratuito",
-        "es": "❌ Gratuito",
-    },
+    "premium_status": {"fr": "✅ Premium", "en": "✅ Premium", "it": "✅ Premium", "es": "✅ Premium"},
+    "free_status": {"fr": "❌ Gratuit", "en": "❌ Free", "it": "❌ Gratuito", "es": "❌ Gratuito"},
 
     "not_found": {
         "fr": "Aucun profil trouvé. Tapez /start pour commencer.",
@@ -429,41 +418,6 @@ _¡Haz preguntas en texto o envía una captura de pantalla!_""",
         "es": "\n\n_{count} pregunta(s) gratuita(s) restante(s)_",
     },
 
-    "morning_title": {
-        "fr": "🌅 *Morning Briefing — {date}*\n",
-        "en": "🌅 *Morning Briefing — {date}*\n",
-        "it": "🌅 *Morning Briefing — {date}*\n",
-        "es": "🌅 *Morning Briefing — {date}*\n",
-    },
-
-    "morning_markets": {
-        "fr": "📊 *Marchés en temps réel :*\n",
-        "en": "📊 *Real-time markets:*\n",
-        "it": "📊 *Mercati in tempo reale:*\n",
-        "es": "📊 *Mercados en tiempo real:*\n",
-    },
-
-    "morning_news": {
-        "fr": "📰 *News à surveiller :*\n\n",
-        "en": "📰 *News to watch:*\n\n",
-        "it": "📰 *Notizie da seguire:*\n\n",
-        "es": "📰 *Noticias a seguir:*\n\n",
-    },
-
-    "morning_ai": {
-        "fr": "🤖 *Analyse IA :*\n",
-        "en": "🤖 *AI Analysis:*\n",
-        "it": "🤖 *Analisi IA:*\n",
-        "es": "🤖 *Análisis IA:*\n",
-    },
-
-    "morning_footer": {
-        "fr": "_Bonne journée et bon trading ! 📈_",
-        "en": "_Have a great day and good trading! 📈_",
-        "it": "_Buona giornata e buon trading! 📈_",
-        "es": "_¡Que tengas un gran día y buen trading! 📈_",
-    },
-
     "signal_lots_header": {
         "fr": "📊 *Tailles de lot par TP :*\n\n",
         "en": "📊 *Lot sizes per TP:*\n\n",
@@ -498,10 +452,115 @@ _¡Haz preguntas en texto o envía una captura de pantalla!_""",
         "it": "💰 *Qual è il tuo capitale attuale?*\n_(es: 2000 per €2000)_",
         "es": "💰 *¿Cuál es tu capital actual?*\n_(ej: 2000 para €2000)_",
     },
+
+    "price_realtime": {
+        "fr": "Prix en temps réel",
+        "en": "Real-time price",
+        "it": "Prezzo in tempo reale",
+        "es": "Precio en tiempo real",
+    },
+}
+
+# Système de prompt IA par langue pour le morning briefing
+MORNING_SYSTEM_PROMPT = {
+    "fr": """Tu es un analyste financier expert qui rédige un morning briefing quotidien pour des traders.
+Tu dois produire un briefing COMPLET et QUALITATIF en français avec ces sections EXACTES :
+
+1. 📰 ACTUALITÉS MACRO DU JOUR
+Liste 4-5 thèmes macro importants qui peuvent impacter les marchés AUJOURD'HUI :
+- Événements économiques prévus (réunions Fed/BCE, publications de données : CPI, NFP, PIB, ISM...)
+- Tensions géopolitiques actuelles impactant les marchés
+- Actualités sur les devises majeures
+- Nouvelles crypto/réglementation
+- Prix des matières premières et pétrole
+Chaque point doit être une phrase COMPLÈTE et INFORMATIVE de 1-2 lignes.
+
+2. 🎯 ANALYSE DES MARCHÉS
+Pour chaque actif (BTC, ETH, OR, EUR/USD), donne :
+- La tendance du jour (haussière/baissière/neutre)
+- Le niveau clé à surveiller
+- L'impact probable des news sur cet actif
+
+3. ⚡ NIVEAUX CLÉS À SURVEILLER
+- Support et résistance principaux pour BTC et OR
+- Zone d'entrée potentielle si signal
+
+Sois précis, professionnel et concis. Pas de phrases génériques. Les traders ont besoin d'informations ACTIONABLES.""",
+
+    "en": """You are an expert financial analyst writing a daily morning briefing for traders.
+You must produce a COMPLETE and QUALITY briefing in English with these EXACT sections:
+
+1. 📰 TODAY'S MACRO NEWS
+List 4-5 important macro themes that can impact markets TODAY:
+- Scheduled economic events (Fed/ECB meetings, data releases: CPI, NFP, GDP, ISM...)
+- Current geopolitical tensions impacting markets
+- Major currency news
+- Crypto/regulation news
+- Commodity and oil prices
+Each point must be a COMPLETE and INFORMATIVE sentence of 1-2 lines.
+
+2. 🎯 MARKET ANALYSIS
+For each asset (BTC, ETH, GOLD, EUR/USD), give:
+- Today's trend (bullish/bearish/neutral)
+- Key level to watch
+- Probable impact of news on this asset
+
+3. ⚡ KEY LEVELS TO WATCH
+- Main support and resistance for BTC and GOLD
+- Potential entry zone if signal
+
+Be precise, professional and concise. No generic sentences. Traders need ACTIONABLE information.""",
+
+    "it": """Sei un analista finanziario esperto che scrive un morning briefing quotidiano per i trader.
+Devi produrre un briefing COMPLETO e di QUALITÀ in italiano con queste sezioni ESATTE:
+
+1. 📰 NOTIZIE MACRO DI OGGI
+Elenca 4-5 temi macro importanti che possono influenzare i mercati OGGI:
+- Eventi economici programmati (riunioni Fed/BCE, pubblicazioni dati: CPI, NFP, PIL, ISM...)
+- Tensioni geopolitiche attuali che impattano i mercati
+- Notizie sulle valute principali
+- Notizie crypto/regolamentazione
+- Prezzi delle materie prime e del petrolio
+Ogni punto deve essere una frase COMPLETA e INFORMATIVA di 1-2 righe.
+
+2. 🎯 ANALISI DEI MERCATI
+Per ogni asset (BTC, ETH, ORO, EUR/USD), fornisci:
+- Il trend del giorno (rialzista/ribassista/neutro)
+- Il livello chiave da monitorare
+- L'impatto probabile delle notizie su questo asset
+
+3. ⚡ LIVELLI CHIAVE DA MONITORARE
+- Supporto e resistenza principali per BTC e ORO
+- Zona di entrata potenziale se segnale
+
+Sii preciso, professionale e conciso. Niente frasi generiche. I trader hanno bisogno di informazioni OPERATIVE.""",
+
+    "es": """Eres un analista financiero experto que redacta un morning briefing diario para traders.
+Debes producir un briefing COMPLETO y de CALIDAD en español con estas secciones EXACTAS:
+
+1. 📰 NOTICIAS MACRO DE HOY
+Lista 4-5 temas macro importantes que pueden impactar los mercados HOY:
+- Eventos económicos programados (reuniones Fed/BCE, publicaciones de datos: CPI, NFP, PIB, ISM...)
+- Tensiones geopolíticas actuales que impactan los mercados
+- Noticias sobre divisas principales
+- Noticias crypto/regulación
+- Precios de materias primas y petróleo
+Cada punto debe ser una frase COMPLETA e INFORMATIVA de 1-2 líneas.
+
+2. 🎯 ANÁLISIS DE MERCADOS
+Para cada activo (BTC, ETH, ORO, EUR/USD), da:
+- La tendencia del día (alcista/bajista/neutral)
+- El nivel clave a vigilar
+- El impacto probable de las noticias en este activo
+
+3. ⚡ NIVELES CLAVE A VIGILAR
+- Soporte y resistencia principales para BTC y ORO
+- Zona de entrada potencial si señal
+
+Sé preciso, profesional y conciso. Sin frases genéricas. Los traders necesitan información ACCIONABLE.""",
 }
 
 def t(key, lang, **kwargs):
-    """Retourne le texte traduit dans la bonne langue"""
     text = T.get(key, {}).get(lang, T.get(key, {}).get("fr", ""))
     for k, v in kwargs.items():
         text = text.replace("{" + k + "}", str(v))
@@ -835,10 +894,7 @@ def check_and_send_alerts(user_id, capital_actuel):
             msg += "📉 Capital actuel : " + str(capital_actuel) + "€\n"
             msg += "📊 Variation : *" + "{:+.1f}".format(variation) + "%*\n"
             msg += "🌍 Langue : " + str(user.get("langue", "fr")).upper() + "\n"
-            if capital_actuel < 250:
-                msg += "⚠️ Capital sous 250€ — intervention recommandée"
-            else:
-                msg += "⚠️ Perte > 50% — intervention recommandée"
+            msg += "⚠️ Capital sous 250€ — intervention recommandée" if capital_actuel < 250 else "⚠️ Perte > 50% — intervention recommandée"
             bot.send_message(ADMIN_ID, msg, parse_mode="Markdown")
             conn = get_db()
             cur = conn.cursor()
@@ -932,109 +988,160 @@ def format_signal_with_lots(signal, lots, capital, risk_percent, lang="fr", brok
     emoji = "📈" if direction == "BUY" else "📉"
     broker_str = " — " + broker if broker else ""
     risque_total = round(capital * (risk_percent / 100), 2)
+    entry_label = {"fr": "Entrée", "en": "Entry", "it": "Entrata", "es": "Entrada"}.get(lang, "Entrée")
+    risk_label = {"fr": "Risque", "en": "Risk", "it": "Rischio", "es": "Riesgo"}.get(lang, "Risque")
+    gain_label = {"fr": "Gain potentiel", "en": "Potential gain", "it": "Guadagno potenziale", "es": "Ganancia potencial"}.get(lang, "Gain potentiel")
+    capital_label = "Capital"
     msg = emoji + " *" + direction + " " + asset + "*" + broker_str + "\n"
-    msg += "💰 " + ("Entrée" if lang == "fr" else "Entry" if lang == "en" else "Entrata" if lang == "it" else "Entrada") + " : " + str(entry_low) + " - " + str(entry_high) + "\n"
+    msg += "💰 " + entry_label + " : " + str(entry_low) + " - " + str(entry_high) + "\n"
     msg += "🔐 Stop Loss : " + str(sl) + "\n"
-    msg += "💼 " + ("Capital" if lang != "es" else "Capital") + " : " + str(capital) + "€ | " + ("Risque" if lang == "fr" else "Risk" if lang == "en" else "Rischio" if lang == "it" else "Riesgo") + " : " + str(risk_percent) + "% (" + str(risque_total) + "€)\n\n"
+    msg += "💼 " + capital_label + " : " + str(capital) + "€ | " + risk_label + " : " + str(risk_percent) + "% (" + str(risque_total) + "€)\n\n"
     msg += t("signal_lots_header", lang)
     for tp in lots:
         optional_tag = t("signal_optional", lang) if tp["optional"] else ""
         msg += "TP" + str(tp["tp_num"]) + " — " + str(tp["tp_price"]) + optional_tag + "\n"
         msg += "   • Lot : *" + str(tp["lot"]) + "* (" + str(tp["pct"]) + "%)\n"
-        risk_label = "Risque" if lang == "fr" else "Risk" if lang == "en" else "Rischio" if lang == "it" else "Riesgo"
-        gain_label = "Gain potentiel" if lang == "fr" else "Potential gain" if lang == "en" else "Guadagno potenziale" if lang == "it" else "Ganancia potencial"
         msg += "   • " + risk_label + " : " + str(tp["risque"]) + "€ | " + gain_label + " : " + str(tp["gain"]) + "€\n"
         msg += "   • R/R : 1:" + str(tp["rr"]) + "\n\n"
     msg += t("signal_footer", lang)
     return msg
 
-def get_macro_news():
+def get_live_market_data():
+    """Récupère toutes les données de marché en temps réel"""
+    data = {}
     try:
-        keywords = "Fed OR FOMC OR BCE OR Trump OR inflation OR interest rate OR crypto OR bitcoin OR gold OR dollar"
-        url = "https://newsapi.org/v2/everything?q=" + requests.utils.quote(keywords) + "&language=fr&sortBy=publishedAt&pageSize=5&apiKey=" + NEWS_API_KEY
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,ripple&vs_currencies=usd&include_24hr_change=true&include_7d_change=true"
         r = requests.get(url, timeout=5)
-        data = r.json()
-        articles = data.get("articles", [])
-        if not articles:
-            url = "https://newsapi.org/v2/everything?q=" + requests.utils.quote(keywords) + "&language=en&sortBy=publishedAt&pageSize=5&apiKey=" + NEWS_API_KEY
-            r = requests.get(url, timeout=5)
-            data = r.json()
-            articles = data.get("articles", [])
-        return articles[:5]
-    except:
-        return []
-
-def get_morning_briefing(lang="fr"):
-    now = datetime.now(TIMEZONE)
-    date_str = now.strftime("%A %d %B %Y").capitalize()
-    msg = t("morning_title", lang, date=date_str)
-    msg += "━━━━━━━━━━━━━━━━━━━━\n\n"
-    msg += t("morning_markets", lang)
-    try:
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true"
-        r = requests.get(url, timeout=5)
-        data = r.json()
-        btc = data["bitcoin"]["usd"]
-        btc_change = data["bitcoin"]["usd_24h_change"]
-        eth = data["ethereum"]["usd"]
-        eth_change = data["ethereum"]["usd_24h_change"]
-        msg += ("🟢" if btc_change >= 0 else "🔴") + " BTC : $" + "{:,.0f}".format(btc) + " (" + "{:+.1f}".format(btc_change) + "%)\n"
-        msg += ("🟢" if eth_change >= 0 else "🔴") + " ETH : $" + "{:,.0f}".format(eth) + " (" + "{:+.1f}".format(eth_change) + "%)\n"
+        d = r.json()
+        data["BTC"] = {"price": d["bitcoin"]["usd"], "change_24h": d["bitcoin"]["usd_24h_change"]}
+        data["ETH"] = {"price": d["ethereum"]["usd"], "change_24h": d["ethereum"]["usd_24h_change"]}
+        data["SOL"] = {"price": d["solana"]["usd"], "change_24h": d["solana"]["usd_24h_change"]}
+        data["XRP"] = {"price": d["ripple"]["usd"], "change_24h": d["ripple"]["usd_24h_change"]}
     except:
         pass
     try:
-        url = "https://api.gold-api.com/price/XAU"
-        r = requests.get(url, timeout=5)
-        data = r.json()
-        msg += "🥇 OR : $" + "{:,.0f}".format(data["price"]) + "/oz\n"
+        r = requests.get("https://api.gold-api.com/price/XAU", timeout=5)
+        data["XAU"] = {"price": r.json()["price"], "change_24h": 0}
     except:
         pass
     try:
         url = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/EUR/USD"
         r = requests.get(url, timeout=5)
-        data = r.json()
-        eurusd = (data[0]["spreadProfilePrices"][0]["ask"] + data[0]["spreadProfilePrices"][0]["bid"]) / 2
-        msg += "💱 EUR/USD : " + "{:.4f}".format(eurusd) + "\n"
+        d = r.json()
+        price = (d[0]["spreadProfilePrices"][0]["ask"] + d[0]["spreadProfilePrices"][0]["bid"]) / 2
+        data["EURUSD"] = {"price": price, "change_24h": 0}
     except:
         pass
-    msg += "\n"
-    articles = get_macro_news()
-    if articles:
-        msg += t("morning_news", lang)
-        for article in articles[:4]:
-            title = article.get("title", "").split(" - ")[0][:80]
-            msg += "• " + title + "\n"
-        msg += "\n"
-        try:
-            news_text = "\n".join([a.get("title", "") for a in articles[:4]])
-            lang_instruction = {
-                "fr": "Réponds en français.",
-                "en": "Reply in English.",
-                "it": "Rispondi in italiano.",
-                "es": "Responde en español."
-            }.get(lang, "Réponds en français.")
-            response = client.messages.create(
-                model="claude-opus-4-5",
-                max_tokens=200,
-                system="Tu es un expert en trading. En 2-3 phrases maximum, dis quel impact ces news peuvent avoir sur BTC, Gold et EUR/USD aujourd'hui. Sois direct et concis. " + lang_instruction,
-                messages=[{"role": "user", "content": "News du jour :\n" + news_text + "\n\nQuel impact sur les marchés ?"}]
-            )
-            msg += t("morning_ai", lang) + response.content[0].text + "\n\n"
-        except:
-            pass
+    try:
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EIXIC?interval=1d&range=2d"
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+        meta = r.json()["chart"]["result"][0]["meta"]
+        prev = meta["previousClose"]
+        price = meta["regularMarketPrice"]
+        data["NASDAQ"] = {"price": price, "change_24h": ((price - prev) / prev) * 100}
+    except:
+        pass
+    try:
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=2d"
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+        meta = r.json()["chart"]["result"][0]["meta"]
+        prev = meta["previousClose"]
+        price = meta["regularMarketPrice"]
+        data["SP500"] = {"price": price, "change_24h": ((price - prev) / prev) * 100}
+    except:
+        pass
+    return data
+
+def get_morning_briefing(lang="fr"):
+    """Génère un morning briefing qualitatif avec analyse IA complète"""
+    now = datetime.now(TIMEZONE)
+    date_labels = {
+        "fr": ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"],
+        "en": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+        "it": ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"],
+        "es": ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"],
+    }
+    month_labels = {
+        "fr": ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"],
+        "en": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
+        "it": ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"],
+        "es": ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"],
+    }
+    day_name = date_labels.get(lang, date_labels["fr"])[now.weekday()]
+    month_name = month_labels.get(lang, month_labels["fr"])[now.month - 1]
+    date_str = day_name + " " + str(now.day) + " " + month_name + " " + str(now.year)
+
+    # Récupère toutes les données marché
+    market_data = get_live_market_data()
+
+    # Header
+    header_emoji = {"fr": "🌅", "en": "🌅", "it": "🌅", "es": "🌅"}.get(lang, "🌅")
+    msg = header_emoji + " *Morning Briefing — " + date_str + "*\n"
+    msg += "━━━━━━━━━━━━━━━━━━━━\n\n"
+
+    # Prix en temps réel
+    markets_label = {"fr": "📊 *Marchés en temps réel :*", "en": "📊 *Real-time markets:*", "it": "📊 *Mercati in tempo reale:*", "es": "📊 *Mercados en tiempo real:*"}.get(lang, "📊 *Marchés:*")
+    msg += markets_label + "\n"
+
+    prices_text = ""
+    for symbol, info in market_data.items():
+        price = info["price"]
+        change = info["change_24h"]
+        emoji = "🟢" if change >= 0 else "🔴"
+        if symbol in ["BTC", "ETH", "SOL", "XRP"]:
+            prices_text += emoji + " " + symbol + " : $" + "{:,.0f}".format(price) if symbol == "BTC" else emoji + " " + symbol + " : $" + "{:,.2f}".format(price)
+            prices_text += " (" + "{:+.1f}".format(change) + "%)\n"
+        elif symbol == "XAU":
+            prices_text += "🥇 OR : $" + "{:,.0f}".format(price) + "/oz\n"
+        elif symbol == "EURUSD":
+            prices_text += "💱 EUR/USD : " + "{:.4f}".format(price) + "\n"
+        elif symbol == "NASDAQ":
+            emoji = "🟢" if change >= 0 else "🔴"
+            prices_text += emoji + " NASDAQ : " + "{:,.0f}".format(price) + " (" + "{:+.1f}".format(change) + "%)\n"
+        elif symbol == "SP500":
+            emoji = "🟢" if change >= 0 else "🔴"
+            prices_text += emoji + " S&P500 : " + "{:,.0f}".format(price) + " (" + "{:+.1f}".format(change) + "%)\n"
+
+    msg += prices_text + "\n"
+
+    # Analyse IA qualitative
+    try:
+        market_summary = "Données de marché actuelles :\n" + prices_text
+        market_summary += "\nDate : " + date_str + "\nJour de la semaine : " + day_name
+
+        system_prompt = MORNING_SYSTEM_PROMPT.get(lang, MORNING_SYSTEM_PROMPT["fr"])
+
+        response = client.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=800,
+            system=system_prompt,
+            messages=[{
+                "role": "user",
+                "content": market_summary + "\n\nRédige le morning briefing complet basé sur ces données de marché et ta connaissance des événements macro actuels. Sois précis et qualitatif."
+            }]
+        )
+        msg += response.content[0].text + "\n\n"
+    except Exception as e:
+        print("Erreur IA briefing : " + str(e))
+
     msg += "━━━━━━━━━━━━━━━━━━━━\n"
-    msg += t("morning_footer", lang)
+    footer = {"fr": "_Bonne journée et bon trading ! 📈_", "en": "_Have a great day and good trading! 📈_", "it": "_Buona giornata e buon trading! 📈_", "es": "_¡Que tengas un gran día y buen trading! 📈_"}.get(lang, "_Bonne journée ! 📈_")
+    msg += footer
     return msg
 
 def send_morning_briefing_to_all():
     try:
         members = get_all_premium()
         sent = 0
+        briefings_cache = {}
         for member in members:
             user_id = member[0]
             lang = member[2] if member[2] else "fr"
             try:
-                briefing = get_morning_briefing(lang)
+                # Cache le briefing par langue pour éviter de générer N fois
+                if lang not in briefings_cache:
+                    briefings_cache[lang] = get_morning_briefing(lang)
+                briefing = briefings_cache[lang]
                 bot.send_message(user_id, briefing, parse_mode="Markdown")
                 sent += 1
                 time.sleep(0.1)
@@ -1074,19 +1181,15 @@ def get_live_prices_context():
     except:
         pass
     try:
-        url = "https://api.gold-api.com/price/XAU"
-        r = requests.get(url, timeout=5)
-        data = r.json()
-        prices["XAU"] = data["price"]
+        r = requests.get("https://api.gold-api.com/price/XAU", timeout=5)
+        prices["XAU"] = r.json()["price"]
     except:
         pass
     try:
         url = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/EUR/USD"
         r = requests.get(url, timeout=5)
-        data = r.json()
-        ask = data[0]["spreadProfilePrices"][0]["ask"]
-        bid = data[0]["spreadProfilePrices"][0]["bid"]
-        prices["EURUSD"] = (ask + bid) / 2
+        d = r.json()
+        prices["EURUSD"] = (d[0]["spreadProfilePrices"][0]["ask"] + d[0]["spreadProfilePrices"][0]["bid"]) / 2
     except:
         pass
     return prices
@@ -1145,10 +1248,8 @@ def get_forex_price(from_currency, to_currency):
 def get_commodity_price(symbol, label):
     try:
         if symbol == "XAU":
-            url = "https://api.gold-api.com/price/XAU"
-            r = requests.get(url, timeout=5)
-            data = r.json()
-            return "🥇 *OR (XAU/USD)*\n💵 $" + "{:,.2f}".format(data["price"]) + " USD/oz"
+            r = requests.get("https://api.gold-api.com/price/XAU", timeout=5)
+            return "🥇 *OR (XAU/USD)*\n💵 $" + "{:,.2f}".format(r.json()["price"]) + " USD/oz"
         elif symbol == "XAG":
             url = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/XAG/USD"
             r = requests.get(url, timeout=5)
@@ -1162,8 +1263,7 @@ def get_index_price(yahoo_symbol, label):
     try:
         url = "https://query1.finance.yahoo.com/v8/finance/chart/" + yahoo_symbol + "?interval=1d&range=2d"
         r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
-        data = r.json()
-        meta = data["chart"]["result"][0]["meta"]
+        meta = r.json()["chart"]["result"][0]["meta"]
         price = meta["regularMarketPrice"]
         prev = meta["previousClose"]
         change = ((price - prev) / prev) * 100
@@ -1499,15 +1599,15 @@ def show_stats(message):
         if total > 0:
             taux = round(total_premium / total * 100, 1)
             msg += "📈 Taux de conversion : *" + str(taux) + "%*\n\n"
-        # Stats par langue
         lang_count = {}
-        for m in get_all_premium():
+        for m in premium:
             l = m[2] if m[2] else "fr"
             lang_count[l] = lang_count.get(l, 0) + 1
         if lang_count:
             msg += "🌍 *Premium par langue :*\n"
             for l, count in lang_count.items():
-                msg += "• " + l.upper() + " : " + str(count) + "\n"
+                flag = {"fr": "🇫🇷", "en": "🇬🇧", "it": "🇮🇹", "es": "🇪🇸"}.get(l, "🌍")
+                msg += flag + " " + l.upper() + " : " + str(count) + "\n"
         bot.reply_to(message, msg, parse_mode="Markdown")
     except Exception as e:
         bot.reply_to(message, "Erreur : " + str(e))
@@ -1630,7 +1730,7 @@ def handle_message(message):
     lang = user.get("langue", "fr") if user else "fr"
 
     # Étape 0 : choix de la langue
-    if onboarding_step == 0 and not (user and user.get("langue") and onboarding_step > 0):
+    if onboarding_step == 0:
         lang_map = {
             "🇫🇷 Français": "fr", "🇬🇧 English": "en",
             "🇮🇹 Italiano": "it", "🇪🇸 Español": "es"
@@ -1650,7 +1750,7 @@ def handle_message(message):
             send_lang_keyboard(user_id)
         return
 
-    # Étape 1 : broker
+    # Étape 1 : broker (onboarding initial)
     if onboarding_step == 1:
         broker = message.text.strip()
         if broker not in BROKERS:
@@ -1663,7 +1763,7 @@ def handle_message(message):
         bot.send_message(user_id, t("broker_saved", lang, broker=broker), parse_mode="Markdown", reply_markup=keyboard)
         return
 
-    # Étape 2 : broker (depuis /broker)
+    # Étape 2 : broker (modification via /broker)
     if onboarding_step == 2:
         broker = message.text.strip()
         if broker not in BROKERS:
@@ -1730,7 +1830,7 @@ def handle_message(message):
             bot.send_message(user_id, t("invalid_risk", lang))
         return
 
-    # Signal en attente
+    # Signal en attente — extraction intelligente du capital
     pending = get_pending_signal(user_id)
     if pending:
         try:
@@ -1780,7 +1880,7 @@ def handle_message(message):
         else:
             price_data = None
         if price_data:
-            price_info = "📡 *" + {"fr": "Prix en temps réel", "en": "Real-time price", "it": "Prezzo in tempo reale", "es": "Precio en tiempo real"}.get(lang, "Prix") + " :*\n" + price_data + "\n\n"
+            price_info = "📡 *" + t("price_realtime", lang) + " :*\n" + price_data + "\n\n"
 
     if price_info and is_price_only_request(message.text, lang):
         footer = t("footer_premium", lang) if is_premium(user_id) else t("footer_free", lang, count=remaining)
@@ -1802,7 +1902,12 @@ def handle_message(message):
         if user_context:
             user_content = "[PROFILE: " + user_context + "]\n\n" + user_content
 
-        lang_instruction = {"fr": "Réponds en français.", "en": "Reply in English.", "it": "Rispondi in italiano.", "es": "Responde en español."}.get(lang, "Réponds en français.")
+        lang_instruction = {
+            "fr": "Réponds en français.",
+            "en": "Reply in English.",
+            "it": "Rispondi in italiano.",
+            "es": "Responde en español."
+        }.get(lang, "Réponds en français.")
 
         history = get_history(user_id)
         messages_with_history = history + [{"role": "user", "content": user_content}]
@@ -1828,7 +1933,7 @@ def run_flask():
 def run_bot():
     while True:
         try:
-            print("AutoTrade Bot is running...")
+            print("AutoTrade Bot is running!")
             bot.infinity_polling(timeout=60, long_polling_timeout=60)
         except Exception as e:
             print("Erreur bot, redemarrage dans 5s: " + str(e))
