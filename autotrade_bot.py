@@ -1327,6 +1327,18 @@ def send_risk_keyboard(user_id, lang="fr"):
     keyboard.add(telebot.types.KeyboardButton(t("custom_risk", lang)))
     bot.send_message(user_id, t("choose_risk", lang), parse_mode="Markdown", reply_markup=keyboard)
 
+# ============================================================
+# HELPER — Accès robuste aux champs d'un objet Stripe
+# ============================================================
+def safe_stripe_get(obj, key, default=None):
+    """Récupère une valeur d'un objet Stripe de manière sûre.
+    Fonctionne avec StripeObject, dict, ou objets hybrides."""
+    try:
+        value = obj[key]
+        return value if value is not None else default
+    except (KeyError, TypeError, AttributeError):
+        return default
+
 @app.route("/webhook", methods=["POST"])
 def stripe_webhook():
     payload = request.data
@@ -1339,46 +1351,68 @@ def stripe_webhook():
 
     print("Stripe event recu: " + event["type"])
 
-    if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
-        user_id = session.get("metadata", {}).get("telegram_user_id")
-        plan = session.get("metadata", {}).get("plan")
-        customer_id = session.get("customer")
-        subscription_id = session.get("subscription")
-        print("Paiement confirme pour user_id: " + str(user_id))
-        if user_id:
-            set_premium(int(user_id), True, plan, customer_id, subscription_id)
-            lang = get_lang(int(user_id))
+    try:
+        if event["type"] == "checkout.session.completed":
+            session = event["data"]["object"]
+
+            # Extraction robuste du metadata (compatible StripeObject et dict)
+            metadata_obj = safe_stripe_get(session, "metadata", {})
             try:
-                bot.send_message(int(user_id), t("payment_confirmed", lang), parse_mode="Markdown")
-                # Notifie aussi l'admin
-                bot.send_message(ADMIN_ID, "💰 *Nouveau paiement !*\n\n👤 ID : " + str(user_id) + "\n📦 Plan : " + str(plan) + "\n🌍 Langue : " + str(lang).upper(), parse_mode="Markdown")
-            except Exception as ex:
-                print("Erreur envoi message: " + str(ex))
+                metadata = dict(metadata_obj) if metadata_obj else {}
+            except (TypeError, ValueError):
+                metadata = {}
 
-    elif event["type"] == "customer.subscription.deleted":
-        session = event["data"]["object"]
-        customer_id = session.get("customer")
-        try:
-            conn = get_db()
-            cur = conn.cursor()
-            cur.execute("SELECT telegram_id FROM users WHERE stripe_customer_id = %s", (customer_id,))
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
-            if row:
-                user_id = row[0]
-                lang = get_lang(user_id)
-                set_premium(user_id, False)
-                clear_history(user_id)
+            user_id = metadata.get("telegram_user_id")
+            plan = metadata.get("plan")
+            customer_id = safe_stripe_get(session, "customer")
+            subscription_id = safe_stripe_get(session, "subscription")
+
+            print("Paiement confirme pour user_id: " + str(user_id))
+
+            if user_id:
+                set_premium(int(user_id), True, plan, customer_id, subscription_id)
+                lang = get_lang(int(user_id))
                 try:
-                    bot.send_message(user_id, t("subscription_cancelled", lang), parse_mode="Markdown")
-                except:
-                    pass
-        except:
-            pass
+                    bot.send_message(int(user_id), t("payment_confirmed", lang), parse_mode="Markdown")
+                    bot.send_message(
+                        ADMIN_ID,
+                        "💰 *Nouveau paiement !*\n\n👤 ID : " + str(user_id) + "\n📦 Plan : " + str(plan) + "\n🌍 Langue : " + str(lang).upper(),
+                        parse_mode="Markdown"
+                    )
+                except Exception as ex:
+                    print("Erreur envoi message: " + str(ex))
+            else:
+                print("ATTENTION : telegram_user_id manquant dans metadata — client non activé automatiquement")
 
-    return jsonify({"status": "ok"})
+        elif event["type"] == "customer.subscription.deleted":
+            session = event["data"]["object"]
+            customer_id = safe_stripe_get(session, "customer")
+            if customer_id:
+                try:
+                    conn = get_db()
+                    cur = conn.cursor()
+                    cur.execute("SELECT telegram_id FROM users WHERE stripe_customer_id = %s", (customer_id,))
+                    row = cur.fetchone()
+                    cur.close()
+                    conn.close()
+                    if row:
+                        user_id = row[0]
+                        lang = get_lang(user_id)
+                        set_premium(user_id, False)
+                        clear_history(user_id)
+                        try:
+                            bot.send_message(user_id, t("subscription_cancelled", lang), parse_mode="Markdown")
+                        except:
+                            pass
+                except Exception as ex:
+                    print("Erreur traitement cancellation: " + str(ex))
+
+    except Exception as e:
+        # Even si le traitement interne plante, on renvoie 200 à Stripe
+        # pour éviter que Stripe ne retente en boucle. L'erreur est loggée.
+        print("Erreur traitement webhook (non bloquante): " + str(e))
+
+    return jsonify({"status": "ok"}), 200
 
 @app.route("/webhook/test", methods=["GET"])
 def webhook_test():
